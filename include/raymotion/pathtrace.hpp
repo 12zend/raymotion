@@ -107,6 +107,7 @@ public:
     bool intersect_triangles_shadow(const Vec3& ro, const Vec3& rd, int node_idx,
                                     double hitt);
     // castray_dir_dist (renderer.gs:825)
+    HitInfo cast_alpha_ray(const Vec3& ro, const Vec3& rd, double dist);
     HitInfo cast_ray(const Vec3& ro, const Vec3& rd, double dist);
     // castshadowray_dist (renderer.gs:1368). 遮蔽があれば true.
     bool cast_shadow_ray(const Vec3& ro, const Vec3& rd, double dist);

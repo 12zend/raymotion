@@ -56,6 +56,19 @@ int main(int argc,char**) {
     build_bvh(scene); cfg.adapt_min=16;
     check(render_image_metal(scene,cam,cfg,98765,gpu,error),error.c_str());
     for(size_t i=0;i<gpu.size();i+=3) check(gpu[i]==127 && gpu[i+1]==0 && gpu[i+2]==0,"emission/adaptive/upload mismatch");
+    // Alpha coverage on emissive surfaces, including CPU/Metal agreement.
+    cfg.spp=2048; cfg.adapt_min=0; cfg.width=16; cfg.height=16;
+    cam.focal=cfg.width*.8660254;
+    for(double opacity : {0., .5, 1.}) {
+        for(auto& t:scene.tris) t.alpha=opacity;
+        check(render_image_metal(scene,cam,cfg,98765,gpu,error),error.c_str());
+        auto alpha_cpu=render_image_parallel(scene,cam,cfg,98765);
+        double difference=0;
+        for(size_t i=0;i<gpu.size();++i) difference+=std::abs(int(gpu[i])-int(alpha_cpu[i]));
+        check(difference/gpu.size()<2.5,"alpha CPU/Metal mismatch");
+        if(opacity==0) for(auto value:gpu) check(value==0,"transparent emission visible");
+        if(opacity==1) check(gpu[0]==127,"opaque emission changed");
+    }
     // Exercise reused buffers, odd dispatch tails, refits and the periodic rebuild.
     cfg.width=37;cfg.height=23;cfg.spp=9;cfg.adapt_min=0;
     for(int frame=0;frame<34;++frame) {

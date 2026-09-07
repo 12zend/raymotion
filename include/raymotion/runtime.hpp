@@ -36,7 +36,7 @@ public:
     }
     void push(const Model& model, Vec3 position={}, Vec3 rotation={}, Vec3 scale={1,1,1},
               Vec3 albedo={-1,-1,-1}, Vec3 emission={-1,-1,-1}, std::optional<double> refract={},
-              std::optional<double> rougth={}, std::optional<double> metallic={}) {
+              std::optional<double> rougth={}, std::optional<double> metallic={}, std::optional<double> alpha={}) {
         if(!model) throw std::runtime_error("null object");
         if(scale.x==0 || scale.y==0 || scale.z==0) throw std::runtime_error("scale must be nonzero");
         topology.push_back(model.get());
@@ -55,7 +55,7 @@ public:
                 t.tu0,t.tv0,t.tu1,t.tv1,t.tu2,t.tv2,normal(t.n0),normal(t.n1),normal(t.n2),
                 albedo.x<0?t.ar:albedo.x,albedo.y<0?t.ag:albedo.y,albedo.z<0?t.ab:albedo.z,
                 emission.x<0?t.er:emission.x,emission.y<0?t.eg:emission.y,emission.z<0?t.eb:emission.z,
-                metallic.value_or(t.metallic),refract.value_or(t.ior),rougth.value_or(t.rough),t.shader);
+                metallic.value_or(t.metallic),refract.value_or(t.ior),rougth.value_or(t.rough),t.shader,alpha.value_or(t.alpha));
             if(index>=0) renderer.scene.tris[index].texture=t.texture;
         }
     }

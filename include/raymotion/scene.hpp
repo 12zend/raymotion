@@ -46,6 +46,7 @@ struct Triangle {
     double ar = 1, ag = 1, ab = 1;
     double er = 0, eg = 0, eb = 0;
     double ior = 1;      // refraction 引数. 1.0001 超で誘電体扱い
+    double alpha = 1;    // surface opacity: 0 transparent, 1 opaque
     double rough = 0.5;  // tri_rougth (綴りは原文ママ)
     int shader = 0;      // 1 で hsv 虹シェーダ (castray_dir_dist の id==1 分岐)
     double metallic = 0;  // reflection 引数. NeRF 的には metallic/specular 重み
@@ -126,7 +127,7 @@ struct Scene {
                      double u1, double v1, double u2, double v2, const Vec3& n0,
                      const Vec3& n1, const Vec3& n2, double ar, double ag, double ab,
                      double er, double eg, double eb, double metallic, double ior,
-                     double rough, int shader);
+                     double rough, int shader, double alpha = 1);
 };
 
 

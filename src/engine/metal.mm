@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <stdexcept>
 
-static_assert(sizeof(metal_data::Triangle)==172, "Metal triangle ABI mismatch");
+static_assert(sizeof(metal_data::Triangle)==176, "Metal triangle ABI mismatch");
 static_assert(sizeof(metal_data::BvhNode)==36, "Metal BVH ABI mismatch");
 static_assert(sizeof(metal_data::Params)==108, "Metal parameters ABI mismatch");
 namespace raymotion {
@@ -91,7 +91,7 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
 #undef V
 #define F(field) t.field=s.field
         F(tu0); F(tv0); F(tu1); F(tv1); F(tu2); F(tv2);
-        F(ar); F(ag); F(ab); F(er); F(eg); F(eb); F(ior); F(rough); F(shader); F(metallic);
+        F(ar); F(ag); F(ab); F(er); F(eg); F(eb); F(ior); F(rough); F(shader); F(metallic); F(alpha);
 #undef F
         t.texture_offset=-1;
         if(s.texture) {

@@ -781,7 +781,7 @@ void PathTracer::direct_lighting(float p_x, float p_y, float p_z, float n_x,
     float pdf =
         dist * dist * lt_lum / (lcos * (float)scene_->light_total);
     float sox = p_x + n_x * 0.002f, soy = p_y + n_y * 0.002f, soz = p_z + n_z * 0.002f;
-    if (cast_shadow_ray({sox, soy, soz}, {ldx, ldy, ldz}, dist - 0.003f)) return;
+    if (cast_alpha_ray({sox, soy, soz}, {ldx, ldy, ldz}, dist - 0.003f).tri >= 0) return;
     float sp = spec_prob;
     float r2 = rough;
     if (r2 < 0) r2 = 0;
@@ -795,7 +795,7 @@ void PathTracer::direct_lighting(float p_x, float p_y, float p_z, float n_x,
     float wnee = 1.0f;
     static const bool nomis = std::getenv("UOW2_NOMIS") != nullptr;
     if (!nomis && e.pdf > 1e-20f) wnee = pdf / (pdf + e.pdf);
-    float k = scos * wnee / pdf;
+    float k = scos * wnee * (float)t.alpha / pdf;
     or_ = (float)t.er * e.r * k;
     og = (float)t.eg * e.g * k;
     ob = (float)t.eb * e.b * k;
@@ -869,6 +869,22 @@ PathTracer::DielectricSample PathTracer::sample_dielectric(
     return out;
 }
 
+// Stochastic surface coverage. Transparent crossings do not consume bounces.
+HitInfo PathTracer::cast_alpha_ray(const Vec3& ro, const Vec3& rd, double dist) {
+    double traveled = 0;
+    while (traveled < dist) {
+        HitInfo hit = cast_ray(ro + rd * traveled, rd, dist - traveled);
+        if (hit.tri < 0) return hit;
+        float opacity = (float)scene_->tris[(size_t)hit.tri].alpha;
+        if (opacity >= 1 || (opacity > 0 && rng_.uniform01() < opacity)) {
+            hit.t += traveled;
+            return hit;
+        }
+        traveled += hit.t + 0.0001f;
+    }
+    return HitInfo{};
+}
+
 Vec3 PathTracer::pathtrace(const Vec3& ro, const Vec3& rd, int max_bounces) {
     // renderer.gs:1505 pathtrace (float 内部版)
     float ox = (float)ro.x, oy = (float)ro.y, oz = (float)ro.z;
@@ -879,7 +895,7 @@ Vec3 PathTracer::pathtrace(const Vec3& ro, const Vec3& rd, int max_bounces) {
     int prev_delta = 1;
     float last_pdf = 0;  // 直前の BSDF 混合 pdf (MIS 用)
     for (int b = 0; b < max_bounces; ++b) {
-        HitInfo hit = cast_ray({ox, oy, oz}, {dx, dy, dz}, kFarClip);
+        HitInfo hit = cast_alpha_ray({ox, oy, oz}, {dx, dy, dz}, kFarClip);
         if (hit.tri < 0) break;
         // 補間法線を幾何法線と同半球に (pt_geom_dot)
         float pnx = (float)hit.n_interp.x, pny = (float)hit.n_interp.y,

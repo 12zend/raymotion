@@ -17,7 +17,7 @@ int Scene::add_triangle(const Vec3& p0, const Vec3& p1, const Vec3& p2, double u
                         double v0, double u1, double v1, double u2, double v2,
                         const Vec3& n0, const Vec3& n1, const Vec3& n2, double ar,
                         double ag, double ab, double er, double eg, double eb,
-                        double metallic, double ior, double rough, int shader) {
+                        double metallic, double ior, double rough, int shader, double alpha) {
     Vec3 e1 = p1 - p0;
     Vec3 e2 = p2 - p0;
     Vec3 n = cross(e1, e2);
@@ -63,6 +63,7 @@ int Scene::add_triangle(const Vec3& p0, const Vec3& p1, const Vec3& p2, double u
     t.eg = eg;
     t.eb = eb;
     t.ior = ior;
+    t.alpha = std::isfinite(alpha) ? std::clamp(alpha, 0.0, 1.0) : 1.0;
     t.rough = rough;
     t.shader = shader;
     t.metallic = metallic;
