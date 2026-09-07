@@ -67,6 +67,17 @@ struct RenderConfig {
     int adapt_step = 8;      // 判定間隔
     double adapt_rel = 0.02;  // 相対閾値 (std < rel*mean + abs で終了)
     double adapt_abs = 0.002;
+    // ReSTIR DI (reservoir-based spatiotemporal importance resampling).
+    // 直接照明の分散を下げ、低 spp でも滑らかにする。不偏性を保つ。
+    // candidates: 初期 RIS 候補数 (1 で従来の単一 NEE と等価)。8 前後を推奨。
+    // spatial: 空間再利用する近傍数 (0 で無効)。3〜5 前後を推奨。
+    // radius: 空間再利用の探索半径 (px)。8〜16 前後を推奨。
+    // mcap: reservoir の M 上限 (時間的過信の防止)。128 前後を推奨。
+    // 0 にすると該当機能を無効化する (candidates<=1 && spatial<=0 で完全に従来動作)。
+    int restir_candidates = 8;
+    int restir_spatial = 4;
+    double restir_radius = 16;
+    int restir_mcap = 128;
 };
 
 } // namespace raymotion

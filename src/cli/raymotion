@@ -134,6 +134,8 @@ def main():
     export.add_argument('output',type=Path)
     for short,long,default in [('w','width',640),('h','height',360),('f','framerate',30),('s','sample',16)]:
         export.add_argument('-'+short,'--'+long,type=positive,default=default)
+    export.add_argument('--restir',dest='restir',action=argparse.BooleanOptionalAction,default=True,
+                        help='use ReSTIR direct lighting for clean low-sample renders (default: enabled)')
     args=parser.parse_args()
     if args.command=='init':
         root=Path(args.path)
@@ -158,9 +160,11 @@ def main():
             if not shutil.which('ffmpeg'): raise ValueError('MP4 export requires ffmpeg in PATH')
         executable=build()
         output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
+        render_env=dict(os.environ)
+        render_env['RAYMOTION_RESTIR']='1' if args.restir else '0'
         with tempfile.TemporaryDirectory(prefix='raymotion-') as temp:
             target=Path(temp)/'output.png' if ext=='.png' else Path(temp)
-            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:],max_frames])
+            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:],max_frames],env=render_env)
             if ext=='.mp4':
                 target=Path(temp)/'output.mp4'
                 run(['ffmpeg','-hide_banner','-loglevel','error','-y','-framerate',args.framerate,'-i',Path(temp)/'f%08d.ppm','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target])

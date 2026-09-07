@@ -12,7 +12,9 @@
 
 static_assert(sizeof(metal_data::Triangle)==176, "Metal triangle ABI mismatch");
 static_assert(sizeof(metal_data::BvhNode)==36, "Metal BVH ABI mismatch");
-static_assert(sizeof(metal_data::Params)==112, "Metal parameters ABI mismatch");
+static_assert(sizeof(metal_data::Params)==184, "Metal parameters ABI mismatch");
+static_assert(sizeof(metal_data::RestirGBuffer)==76, "ReSTIR G-buffer ABI mismatch");
+static_assert(sizeof(metal_data::RestirReservoir)==60, "ReSTIR reservoir ABI mismatch");
 namespace raymotion {
 namespace {
 std::string diagnostic(NSError* e) {
@@ -22,10 +24,20 @@ struct Context {
     id<MTLDevice> device;
     id<MTLCommandQueue> queue;
     id<MTLComputePipelineState> pipeline, simd8, simd32;
+    id<MTLComputePipelineState> restirGenerate, restirSpatial, restirShade;
+    id<MTLComputePipelineState> denoiseTemporal, denoiseAtrous, denoiseTonemap;
     std::string error;
     bool raytracing=false;
     std::mutex mutex;
     id<MTLBuffer> buffers[5], textures, image, vertices, scratch;
+    id<MTLBuffer> restirGbuf, restirInit, restirMerged;
+    id<MTLBuffer> hdrShade, denA, histColor;
+    // Previous-frame ReSTIR history for temporal reuse (video).
+    id<MTLBuffer> histGbuf, histRes;
+    metal_data::Camera histCam{};
+    int histW=0, histH=0;
+    uint64_t histSeed=0, histHash=0;
+    bool histValid=false;
     id<MTLAccelerationStructure> acceleration;
     std::vector<metal_data::MetalVec3> previousPositions;
     unsigned refits=0;
@@ -61,6 +73,18 @@ struct Context {
                 if (!specialized) { error=diagnostic(e); return; }
                 if (lanes==8) simd8=specialized; else simd32=specialized;
             }
+            restirGenerate=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"restir_generate"] error:&e];
+            if (!restirGenerate) { error=diagnostic(e); return; }
+            restirSpatial=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"restir_spatial"] error:&e];
+            if (!restirSpatial) { error=diagnostic(e); return; }
+            restirShade=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"restir_shade"] error:&e];
+            if (!restirShade) { error=diagnostic(e); return; }
+            denoiseTemporal=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"denoise_temporal"] error:&e];
+            if (!denoiseTemporal) { error=diagnostic(e); return; }
+            denoiseAtrous=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"denoise_atrous"] error:&e];
+            if (!denoiseAtrous) { error=diagnostic(e); return; }
+            denoiseTonemap=[device newComputePipelineStateWithFunction:[library newFunctionWithName:@"denoise_tonemap"] error:&e];
+            if (!denoiseTonemap) { error=diagnostic(e); return; }
             queue=[device newCommandQueue];
             if (!queue) error="Could not create Metal command queue";
         }
@@ -80,7 +104,7 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
     std::lock_guard<std::mutex> lock(context.mutex);
     struct CacheGuard {
         Context& context; bool completed=false;
-        ~CacheGuard() { if (!completed) { context.acceleration=nil; context.previousPositions.clear(); } }
+        ~CacheGuard() { if (!completed) { context.acceleration=nil; context.previousPositions.clear(); context.histValid=false; } }
     } guard{context};
     std::vector<metal_data::MetalVec3> texels;
     std::unordered_map<const Texture*,int> offsets;
@@ -131,6 +155,19 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
     p.adapt_step=cfg.adapt_step>0 ? cfg.adapt_step : 8;
     p.opaque=std::all_of(tris.begin(),tris.end(),[](const auto& t) { return t.alpha>=1; });
     p.nomis=std::getenv("UOW2_NOMIS")!=nullptr;
+    // ReSTIR DI: RAYMOTION_RESTIR=0 で完全無効 (従来 NEE 動作)。
+    bool restir_off = std::getenv("RAYMOTION_RESTIR") && std::string(std::getenv("RAYMOTION_RESTIR"))=="0";
+    p.restir_candidates = restir_off ? 1 : (cfg.restir_candidates>0 ? cfg.restir_candidates : 1);
+    if (p.restir_candidates<1) p.restir_candidates=1;
+    if (p.restir_candidates>32) p.restir_candidates=32;
+    p.restir_spatial = restir_off ? 0 : (cfg.restir_spatial>0 ? cfg.restir_spatial : 0);
+    if (p.restir_spatial<0) p.restir_spatial=0;
+    if (p.restir_spatial>8) p.restir_spatial=8;
+    p.restir_mcap = cfg.restir_mcap>0 ? cfg.restir_mcap : 128;
+    if (p.restir_mcap<1) p.restir_mcap=1;
+    p.restir_radius = cfg.restir_radius>0 ? float(cfg.restir_radius) : 16.0f;
+    if (const char* v=std::getenv("RAYMOTION_RESTIR_CANDIDATES")) p.restir_candidates=std::max(1,std::atoi(v));
+    if (const char* v=std::getenv("RAYMOTION_RESTIR_SPATIAL")) p.restir_spatial=std::max(0,std::atoi(v));
     auto upload=[&](id<MTLBuffer> __strong& target,const void* data,size_t size) -> bool {
         size_t capacity=std::max(size_t(4),size);
         if (!target || target.length<capacity)
@@ -191,6 +228,162 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
             [builder endEncoding];
             context.previousPositions=std::move(positions);
         }
+    }
+    // ReSTIR spatial path: G-buffer + reservoir reuse (low-spp quality).
+    // Large frames fall back to RIS-only (old kernels with RIS NEE) to bound memory.
+    // Transparent scenes (any alpha<1) also fall back: single-primary G-buffer
+    // cannot average stochastic coverage correctly (tone-map nonlinearity).
+    size_t restirBytes = pixels*(sizeof(metal_data::RestirGBuffer)+2*sizeof(metal_data::RestirReservoir));
+    bool useSpatial = (p.restir_spatial>0 && p.lights>0 && p.bounces>0 && p.opaque && restirBytes<=size_t(512)*1024*1024);
+    // Temporal history: reusable across video frames with identical scene bytes
+    // and a fresh seed. Guards keep unrelated renders isolated:
+    // same seed replays exactly (no history), changed geometry disables reuse.
+    uint64_t sceneHash = uint64_t(tris.size()) * 0x9E3779B97F4A7C15ULL
+        ^ uint64_t(scene.light_tri.size()) * 0xBF58476D1CE4E5B9ULL
+        ^ uint64_t(std::hash<double>{}(scene.light_total));
+    const unsigned char* tb = reinterpret_cast<const unsigned char*>(tris.data());
+    for (size_t i = 0, n = tris.size()*sizeof(tris[0]); i < n; ++i) {
+        sceneHash ^= uint64_t(tb[i]);
+        sceneHash *= 0x100000001B3ULL;
+    }
+    bool haveHistory = useSpatial && context.histValid && context.histW==cfg.width && context.histH==cfg.height
+        && context.histGbuf && context.histRes && seed != context.histSeed && sceneHash == context.histHash;
+    if (const char* tv=std::getenv("RAYMOTION_RESTIR_TEMPORAL"))
+        if (std::string(tv)=="0") haveHistory = false;
+    p.hasHistory = haveHistory ? 1 : 0;
+    p.prevCamera = context.histCam;
+    if (useSpatial) {
+        auto alloc=[&](id<MTLBuffer> __strong& target,size_t size) -> bool {
+            if (!target || target.length<size)
+                target=[context.device newBufferWithLength:std::max(size_t(4),size) options:MTLResourceStorageModeShared];
+            return target!=nil;
+        };
+        if (!alloc(context.restirGbuf,pixels*sizeof(metal_data::RestirGBuffer)) ||
+            !alloc(context.restirInit,pixels*sizeof(metal_data::RestirReservoir)) ||
+            !alloc(context.restirMerged,pixels*sizeof(metal_data::RestirReservoir)) ||
+            !alloc(context.hdrShade,pixels*3*sizeof(float)) ||
+            !alloc(context.denA,pixels*3*sizeof(float)) ||
+            !alloc(context.histColor,pixels*3*sizeof(float))) {
+            error="Metal ReSTIR buffer allocation failed"; return false;
+        }
+        bool denoise = true;
+        if (const char* dv=std::getenv("RAYMOTION_DENOISE"))
+            if (std::string(dv)=="0") denoise = false;
+        auto setScene=[&](id<MTLComputeCommandEncoder> enc) {
+            for(int i=0;i<5;++i) [enc setBuffer:context.buffers[i] offset:0 atIndex:i];
+            [enc setBytes:&p length:sizeof(p) atIndex:5];
+            [enc setBytes:&seed length:sizeof(seed) atIndex:6];
+            [enc setBuffer:result offset:0 atIndex:7];
+            [enc setBuffer:context.textures offset:0 atIndex:9];
+            if (context.raytracing) [enc setAccelerationStructure:context.acceleration atBufferIndex:8];
+        };
+        auto dispatch1D=[&](id<MTLComputePipelineState> pl) -> id<MTLComputeCommandEncoder> {
+            id<MTLComputeCommandEncoder> enc=[command computeCommandEncoder];
+            if (!enc) return nil;
+            [enc setComputePipelineState:pl];
+            setScene(enc);
+            return enc;
+        };
+        // Pass 1: primary G-buffer + initial reservoir.
+        {
+            id<MTLComputeCommandEncoder> enc=dispatch1D(context.restirGenerate);
+            if (!enc) { error="Metal command allocation failed"; return false; }
+            [enc setBuffer:context.restirGbuf offset:0 atIndex:10];
+            [enc setBuffer:context.restirInit offset:0 atIndex:11];
+            NSUInteger w=std::min(NSUInteger(256),context.restirGenerate.maxTotalThreadsPerThreadgroup);
+            [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+            [enc endEncoding];
+        }
+        // Pass 2: temporal + spatial reuse (reads init/history, writes merged).
+        {
+            id<MTLComputeCommandEncoder> enc=dispatch1D(context.restirSpatial);
+            if (!enc) { error="Metal command allocation failed"; return false; }
+            [enc setBuffer:context.restirGbuf offset:0 atIndex:10];
+            [enc setBuffer:context.restirInit offset:0 atIndex:11];
+            [enc setBuffer:context.restirMerged offset:0 atIndex:12];
+            [enc setBuffer:context.histGbuf offset:0 atIndex:13];
+            [enc setBuffer:context.histRes offset:0 atIndex:14];
+            NSUInteger w=std::min(NSUInteger(256),context.restirSpatial.maxTotalThreadsPerThreadgroup);
+            [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+            [enc endEncoding];
+        }
+        // Pass 3: shade with merged reservoir + spp-averaged indirect (linear HDR).
+        {
+            id<MTLComputeCommandEncoder> enc=dispatch1D(context.restirShade);
+            if (!enc) { error="Metal command allocation failed"; return false; }
+            [enc setBuffer:context.restirGbuf offset:0 atIndex:10];
+            [enc setBuffer:context.restirMerged offset:0 atIndex:12];
+            [enc setBuffer:context.hdrShade offset:0 atIndex:15];
+            NSUInteger w=std::min(NSUInteger(256),context.restirShade.maxTotalThreadsPerThreadgroup);
+            [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+            [enc endEncoding];
+        }
+        // Passes 4-7: edge-guided spatiotemporal denoise (or tonemap-only).
+        if (denoise) {
+            {
+                id<MTLComputeCommandEncoder> enc=dispatch1D(context.denoiseTemporal);
+                if (!enc) { error="Metal command allocation failed"; return false; }
+                [enc setBuffer:context.restirGbuf offset:0 atIndex:10];
+                [enc setBuffer:context.histGbuf offset:0 atIndex:13];
+                [enc setBuffer:context.hdrShade offset:0 atIndex:15];
+                [enc setBuffer:context.histColor offset:0 atIndex:16];
+                [enc setBuffer:context.denA offset:0 atIndex:17];
+                NSUInteger w=std::min(NSUInteger(256),context.denoiseTemporal.maxTotalThreadsPerThreadgroup);
+                [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+                [enc endEncoding];
+            }
+            for (int step = 0; step < 2; ++step) {
+                id<MTLComputeCommandEncoder> enc=dispatch1D(context.denoiseAtrous);
+                if (!enc) { error="Metal command allocation failed"; return false; }
+                [enc setBuffer:context.restirGbuf offset:0 atIndex:10];
+                if (step == 0) {
+                    [enc setBuffer:context.denA offset:0 atIndex:18];
+                    [enc setBuffer:context.histColor offset:0 atIndex:19];
+                } else {
+                    [enc setBuffer:context.histColor offset:0 atIndex:18];
+                    [enc setBuffer:context.denA offset:0 atIndex:19];
+                }
+                [enc setBytes:&step length:sizeof(step) atIndex:20];
+                NSUInteger w=std::min(NSUInteger(256),context.denoiseAtrous.maxTotalThreadsPerThreadgroup);
+                [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+                [enc endEncoding];
+            }
+            {
+                id<MTLComputeCommandEncoder> enc=dispatch1D(context.denoiseTonemap);
+                if (!enc) { error="Metal command allocation failed"; return false; }
+                [enc setBuffer:context.denA offset:0 atIndex:18];
+                NSUInteger w=std::min(NSUInteger(256),context.denoiseTonemap.maxTotalThreadsPerThreadgroup);
+                [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+                [enc endEncoding];
+            }
+        } else {
+            id<MTLComputeCommandEncoder> enc=dispatch1D(context.denoiseTonemap);
+            if (!enc) { error="Metal command allocation failed"; return false; }
+            [enc setBuffer:context.hdrShade offset:0 atIndex:18];
+            NSUInteger w=std::min(NSUInteger(256),context.denoiseTonemap.maxTotalThreadsPerThreadgroup);
+            [enc dispatchThreadgroups:MTLSizeMake((pixels+w-1)/w,1,1) threadsPerThreadgroup:MTLSizeMake(w,1,1)];
+            [enc endEncoding];
+        }
+        [command commit]; [command waitUntilCompleted];
+        if(command.status!=MTLCommandBufferStatusCompleted) {
+            context.acceleration=nil; context.previousPositions.clear();
+            error=diagnostic(command.error); return false;
+        }
+        output.resize(pixels*3); std::memcpy(output.data(),result.contents,output.size());
+        guard.completed=true;
+        // Publish this frame as next frame's temporal history (ping-pong swap;
+        // generate/spatial fully overwrite the buffers they write).
+        std::swap(context.restirGbuf, context.histGbuf);
+        std::swap(context.restirMerged, context.histRes);
+        if (denoise) std::swap(context.denA, context.histColor);
+#define HC(field) context.histCam.field=float(cam.field)
+        HC(x); HC(y); HC(z); HC(focal);
+        HC(m0); HC(m1); HC(m2); HC(m3); HC(m4); HC(m5); HC(m6); HC(m7); HC(m8);
+#undef HC
+        context.histW=cfg.width; context.histH=cfg.height;
+        context.histSeed=seed; context.histHash=sceneHash;
+        context.histValid=true;
+        return true;
     }
     id<MTLComputeCommandEncoder> encoder=[command computeCommandEncoder];
     if(!command || !encoder) { error="Metal command allocation failed"; return false; }
