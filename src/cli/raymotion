@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""raymotion: compile .ray programs to C++ and render frames."""
+import argparse
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+VERSION = '0.1.0'
+# Preserve strings/comments as opaque tokens; only rewrite actual code tokens.
+TOKEN = re.compile(r'R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\(.*?\)(?P=delimiter)"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[A-Za-z_]\w*|\s+|.', re.S)
+
+def transpile(source):
+    tokens = [m.group() for m in TOKEN.finditer(source)]
+    significant = [i for i,t in enumerate(tokens) if not t.isspace() and not t.startswith(('//','/*'))]
+    for k, i in enumerate(significant):
+        seq = [tokens[j] for j in significant[k:k+7]]
+        if len(seq)==7 and seq[0]=='void' and re.fullmatch(r'[A-Za-z_]\w*',seq[1]) and seq[2:]==['=','object','.','init','(']:
+            tokens[i]='auto'
+    # Include directives belong outside the generated entry point.
+    body=''.join(tokens)
+    includes=[]
+    lines=body.splitlines(keepends=True)
+    for i,line in enumerate(lines):
+        if re.match(r'^\s*#\s*include\b',line):
+            includes.append(line); lines[i]='\n'
+    return '''#include <raymotion/runtime.hpp>
+#include <iostream>
+#include <cmath>
+'''+''.join(includes)+'''using namespace raymotion;
+int main(int argc, char** argv) {
+  try {
+    if(argc!=7) throw std::runtime_error("run this program with raymotion export");
+    const int width=std::stoi(argv[2]), height=std::stoi(argv[3]);
+    const int sample=std::stoi(argv[4]), framerate=std::stoi(argv[5]);
+    Objects object(argv[1],width,height,sample,std::string(argv[6])=="mp4");
+    auto& camera=object.camera;
+#line 1 "main.ray"
+'''+''.join(lines)+'''
+    object.finish();
+    return 0;
+  } catch(const std::exception& e) { std::cerr << "raymotion: " << e.what() << "\\n"; return 1; }
+}
+'''
+
+def run(args, **kwargs):
+    subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+def build():
+    source=Path('main.ray')
+    if not source.is_file(): raise ValueError('main.ray not found; run raymotion init first')
+    folder=Path('.raymotion/build').resolve(); folder.mkdir(parents=True,exist_ok=True)
+    cpp=folder/'main.cpp'; cpp.write_text(transpile(source.read_text()))
+    here=Path(__file__).resolve()
+    prefix=here.parent.parent
+    if (prefix/'lib/libraymotion_engine.a').is_file():
+        library=prefix/'lib/libraymotion_engine.a'
+    else:
+        prefix=here.parents[2]
+        if not (prefix/'CMakeLists.txt').is_file(): raise ValueError('raymotion runtime not found')
+        engine=folder/'engine'
+        run(['cmake','-S',prefix,'-B',engine,'-DCMAKE_BUILD_TYPE=Release','-DBUILD_TESTING=OFF'])
+        run(['cmake','--build',engine,'--parallel'])
+        library=engine/'libraymotion_engine.a'
+    executable=folder/'main'
+    run([os.environ.get('CXX','c++'),'-std=c++17','-O3','-pthread','-I',Path.cwd(),'-I',prefix/'include',cpp,library,'-o',executable])
+    return executable
+
+def positive(value):
+    n=int(value)
+    if n<=0: raise argparse.ArgumentTypeError('must be a positive integer')
+    return n
+
+def main():
+    parser=argparse.ArgumentParser(prog='raymotion')
+    parser.add_argument('--version',action='version',version='raymotion '+VERSION)
+    sub=parser.add_subparsers(dest='command',required=True)
+    init=sub.add_parser('init'); init.add_argument('path',nargs='?',default='.')
+    sub.add_parser('build')
+    export=sub.add_parser('export',add_help=False)
+    export.add_argument('--help',action='help')
+    export.add_argument('output',type=Path)
+    for short,long,default in [('w','width',640),('h','height',360),('f','framerate',30),('s','sample',16)]:
+        export.add_argument('-'+short,'--'+long,type=positive,default=default)
+    args=parser.parse_args()
+    if args.command=='init':
+        root=Path(args.path)
+        root.mkdir(parents=True,exist_ok=True)
+        if (root/'main.ray').exists(): raise ValueError('main.ray already exists')
+        (root/'assets').mkdir(exist_ok=True)
+        (root/'main.ray').write_text('// Add OBJ models to assets/. Camera faces +Z at the origin.\n// void model = object.init("assets/model.obj");\n// object.push(model, {0, 0, 3});\nobject.render();\n')
+        print('Initialized '+str(root.resolve()))
+    elif args.command=='build':
+        print('Built '+str(build()))
+    else:
+        ext=args.output.suffix.lower()
+        if ext not in ('.png','.mp4'): raise ValueError('output must end in .png or .mp4')
+        if args.width*args.height>100_000_000: raise ValueError('image exceeds 100 million pixels')
+        if ext=='.mp4':
+            if args.width%2 or args.height%2: raise ValueError('MP4 width and height must be even')
+            if not shutil.which('ffmpeg'): raise ValueError('MP4 export requires ffmpeg in PATH')
+        executable=build()
+        output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='raymotion-') as temp:
+            target=Path(temp)/'output.png' if ext=='.png' else Path(temp)
+            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:]])
+            if ext=='.mp4':
+                target=Path(temp)/'output.mp4'
+                run(['ffmpeg','-hide_banner','-loglevel','error','-y','-framerate',args.framerate,'-i',Path(temp)/'f%08d.ppm','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target])
+            shutil.copyfile(target,output)
+        print('Exported '+str(output))
+
+if __name__=='__main__':
+    try: main()
+    except (ValueError,OSError,subprocess.CalledProcessError) as e:
+        print('raymotion: '+str(e),file=sys.stderr); sys.exit(1)
