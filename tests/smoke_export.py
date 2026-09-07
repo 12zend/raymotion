@@ -18,7 +18,41 @@ with tempfile.TemporaryDirectory(prefix='raymotion-smoke-') as temp:
         return result
     run('init',str(root))
     (root/'assets/model.obj').write_text('v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\nf -4 -3 -2 -1\n')
-    base='void model = object.init("assets/model.obj");\n'
+    base='''void model = object.init("assets/model.obj");
+camera.set({1,2,3}, {10,20,30}, 45);
+if(camera.get.position.x!=1 || camera.get.position.y!=2 || camera.get.position.z!=3 ||
+   camera.get.rotation.x!=10 || camera.get.rotation.y!=20 ||
+   camera.get.rotation.z!=30 || camera.get.fov!=45)
+    throw std::runtime_error("camera.get values");
+Camera copied = camera;
+camera.x = 99;
+if(camera.get.position.x!=99 || copied.get.position.x!=1)
+    throw std::runtime_error("camera.get copy independence");
+camera = copied;
+copied.x = -1;
+Vec3 position = camera.get.position;
+if(position.x!=1 || position.y!=2 || position.z!=3)
+    throw std::runtime_error("camera.get assignment independence");
+if(camera.x!=1 || camera.y!=2 || camera.z!=3 ||
+   camera.dirx!=10 || camera.diry!=20 || camera.dirz!=30 || camera.fov!=45)
+    throw std::runtime_error("camera.set full arguments");
+camera.set({4,5,6}, {0,90,0});
+if(camera.x!=4 || camera.y!=5 || camera.z!=6 || camera.dirx!=0 ||
+   camera.diry!=90 || camera.dirz!=0 || camera.fov!=60)
+    throw std::runtime_error("camera.set default fov");
+camera.set(Vec3{7,8,9});
+if(camera.x!=7 || camera.y!=8 || camera.z!=9 ||
+   camera.dirx!=0 || camera.diry!=0 || camera.dirz!=0 || camera.fov!=60)
+    throw std::runtime_error("camera.set default rotation");
+camera.set({}, {}, 90);
+if(std::abs(camera.focal-240)>1e-9)
+    throw std::runtime_error("camera.set focal update");
+camera.set();
+if(camera.x!=0 || camera.y!=0 || camera.z!=0 ||
+   camera.dirx!=0 || camera.diry!=0 || camera.dirz!=0 || camera.fov!=60 ||
+   camera.m0!=1 || camera.m4!=1 || camera.m8!=1)
+    throw std::runtime_error("camera.set reset");
+'''
     push='object.push(model, {0,0,3}, {0,0,0}, {1,1,1}, {1,0,0}, {1,0,0});\nobject.render();\n'
     (root/'main.ray').write_text(base+push)
     run('build')

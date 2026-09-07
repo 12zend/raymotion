@@ -161,7 +161,28 @@ object.push(example, {0, 0, 3});      // 位置のみ
 `Vec3{x,y,z}` または `{x,y,z}` が使えます。
 
 カメラ初期値は原点、回転ゼロ、+Z方向、FOV 60度です。
+`camera.set(position, rotation, fov);` でまとめて設定できます。
+`object.push` と同様に末尾引数を省略でき、省略した値は以前の値ではなく既定値になります。
+
+```cpp
+camera.set();                          // 原点、回転ゼロ、FOV 60度に戻す
+camera.set({0, 1, -3});                // 位置のみ（回転ゼロ、FOV 60度）
+camera.set({0, 1, -3}, {0, 15, 0});    // 位置と回転（度）
+camera.set({0, 1, -3}, {0, 15, 0}, 45); // すべて指定
+camera.set({}, {}, 45);               // 原点、回転ゼロ、FOV 45度
+```
+
 `camera.x/y/z`、`camera.dirx/diry/dirz`（度）、`camera.fov`で指定できます。
+現在値は読み取り専用の `camera.get` から取得できます（括弧は不要です）。
+`camera.get.position.x/y/z` が位置、`camera.get.rotation.x/y/z` が回転（度）、
+`camera.get.fov` がFOV（度）です。設定を変更すると参照値にも直ちに反映されます。
+
+```cpp
+double x = camera.get.position.x;
+Vec3 rotation = camera.get.rotation;
+double fov = camera.get.fov;
+```
+
 CLIで指定した`width`、`height`、`sample`、`framerate`は読み取り専用変数です。
 
 ### 動画
