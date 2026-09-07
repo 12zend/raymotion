@@ -14,6 +14,7 @@
 
 #include "raymotion/bvh.hpp"
 #include "raymotion/obj.hpp"
+#include "raymotion/metal.hpp"
 
 namespace raymotion {
 namespace fs = std::filesystem;
@@ -39,6 +40,21 @@ int Renderer::effective_threads() const {
 }
 
 std::vector<uint8_t> Renderer::render(uint64_t seed, ProgressFn progress) {
+    const char* setting = std::getenv("RAYMOTION_DEVICE");
+    std::string device = setting ? setting : "auto";
+    if (device != "auto" && device != "cpu" && device != "metal")
+        throw std::invalid_argument("RAYMOTION_DEVICE must be auto, cpu, or metal");
+    if (device != "cpu") {
+        std::vector<uint8_t> image;
+        std::string error;
+        if (render_image_metal(scene, camera, config, seed, image, error)) {
+            if (progress) progress(config.height, config.height);
+            return image;
+        }
+        if (device == "metal") throw std::runtime_error("Metal: " + error);
+        static std::once_flag warning;
+        std::call_once(warning, [&] { std::cerr << "raymotion: using CPU (" << error << ")\n"; });
+    }
     return render_image_parallel(scene, camera, config, seed, effective_threads(),
                                  std::move(progress));
 }

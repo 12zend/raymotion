@@ -1,6 +1,6 @@
 # raymotion
 
-C++17へコンパイルするシーン記述言語とCPUパストレーシングCLIです。
+C++17へコンパイルするシーン記述言語と、Metal GPU / CPUパストレーシングCLIです。
 固定シーン・OBJ・カメラ軌道は同梱しません。
 
 ## ビルドとインストール
@@ -54,11 +54,69 @@ raymotion export out.mp4 --width 1280 --height 720 --framerate 30 --sample 16
 | `-h / --height` | 360 | 縦ピクセル数 |
 | `-f / --framerate` | 30 | 動画FPS・プログラム内の`framerate` |
 | `-s / --sample` | 16 | 1ピクセルのサンプル数 |
+| `--device` | `auto` | `auto` / `metal` / `cpu` |
 
 ヘルプは `raymotion export --help`。`-h` は高さです。
 MP4のサイズは偶数が必要です。出力先の親フォルダは自動生成します。
 PNGは `object.render()` 1回、MP4は1回以上必要です。
 動画時間は `render()` の実行回数 ÷ FPSです。拡張子は大文字も受け付けます。
+
+## Metal GPUによる高速化
+
+macOSではMetalを自動選択します。GPUを利用できない場合は理由を表示し、CPUへ
+フォールバックします。`--device metal` を指定した場合はGPU利用に失敗するとエラーに
+なるため、GPUで動いていることを確認できます。LinuxはCPUで動作します。
+
+```sh
+raymotion export out.png -w 1280 -h 720 -s 128 --device metal
+raymotion export out.mp4 -w 1280 -h 720 -s 32 --device metal
+raymotion export out.png --device cpu
+```
+
+`RAYMOTION_DEVICE=cpu|metal|auto` でも指定でき、CLIの明示指定が優先します。
+Metal対応版は通常のCMakeビルドで生成されます。CPU専用ビルドは
+`-DRAYMOTION_METAL=OFF` を指定してください。シェーダーをライブラリ内へ埋め込むため、
+インストール先への `.metal` 配置や、XcodeのオフラインMetalコンパイラは不要です。
+初回描画時にGPU用パイプラインをコンパイルし、同じプロセス内では再利用します。
+
+対応GPUではMetalのレイトレーシングAPIを使用し、非対応GPUではMetal compute上で
+スタック不要のBVH走査を実行します。MetalレイトレーシングAPIはmacOS 11以降が対象です。
+M1でも動作し、レイトレーシング専用ハードウェアの搭載は必須ではありません。
+1画素を8または32レーンで分担し、GPU向け32bit乱数生成とfloat演算を使います。
+拡散反射、GGX金属、粗い／滑らかな屈折、発光、直接照明・MIS、クランプ、適応サンプリングを
+実装しています。乱数列・演算精度がCPUと異なるため、画像はビット単位では一致しません。
+
+GPUバッファとパイプラインはフレーム間で再利用します。頂点が変化しないフレームでは
+Metal加速構造を再利用し、同じ三角形数で頂点が変化した場合はrefitします。
+31回のrefit後、または三角形数の変更時に再構築します。
+OBJ読み込み・オブジェクト変換・CPU側BVH更新・画像保存・FFmpeg処理はCPUで実行します。
+そのため、小さな画像や低サンプル数、コンパイル・動画エンコードが支配的な処理では
+全体の短縮率が小さくなる場合があります。
+
+2026-09-07、MacBook Air M1（8 CPUコア / 7 GPUコア）、Releaseビルドでの測定です。
+128 spp・適応サンプリング無効、初回ウォームアップ後の3回の中央値。
+CPUは全コアを使用。GPUへのシーン転送と結果読出しを含み、シェーダー／C++コンパイル、
+CPU BVH構築、PNG保存、動画エンコードは含みません。速度比はシーン・GPU・設定に依存します。
+
+| シーン | CPU | Metal | 速度比 |
+| --- | ---: | ---: | ---: |
+| 2,500三角形、320×240 | 0.620秒 | 0.174秒 | 3.56倍 |
+| 拡散・金属・ガラス・面光源、640×360 | 2.657秒 | 0.589秒 | 4.51倍 |
+
+初回フレーム（パイプライン作成後、加速構造の構築を含む）は、それぞれ
+CPU 0.608秒 / Metal 0.238秒、CPU 2.785秒 / Metal 0.621秒でした。
+
+検証・ベンチマーク:
+
+```sh
+RAYMOTION_REQUIRE_METAL=1 ./build/test_metal --benchmark
+RAYMOTION_DEVICE=metal python3 tests/smoke_export.py /absolute/path/to/bin/raymotion
+```
+
+`test_metal` は空シーン、材質のCPU比較、再現性、適応サンプリング、端数サイズ、
+34フレームの更新を検証します。GPUがない環境ではCTestでスキップし、
+`RAYMOTION_REQUIRE_METAL=1` ではGPU不在も失敗にします。
+`RAYMOTION_METAL_TRAVERSAL=software` を指定すると、compute版BVHの検証もできます。
 
 ## 言語
 

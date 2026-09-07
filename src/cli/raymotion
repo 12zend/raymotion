@@ -66,7 +66,7 @@ def build():
         run(['cmake','--build',engine,'--parallel'])
         library=engine/'libraymotion_engine.a'
     executable=folder/'main'
-    run([os.environ.get('CXX','c++'),'-std=c++17','-O3','-pthread','-I',Path.cwd(),'-I',prefix/'include',cpp,library,'-o',executable])
+    run([os.environ.get('CXX','c++'),'-std=c++17','-O3','-pthread','-I',Path.cwd(),'-I',prefix/'include',cpp,library,*(['-framework','Foundation','-framework','Metal'] if sys.platform=='darwin' else []),'-o',executable])
     return executable
 
 def positive(value):
@@ -83,6 +83,7 @@ def main():
     export=sub.add_parser('export',add_help=False)
     export.add_argument('--help',action='help')
     export.add_argument('output',type=Path)
+    export.add_argument('--device',choices=['auto','cpu','metal'],default=os.environ.get('RAYMOTION_DEVICE','auto'))
     for short,long,default in [('w','width',640),('h','height',360),('f','framerate',30),('s','sample',16)]:
         export.add_argument('-'+short,'--'+long,type=positive,default=default)
     args=parser.parse_args()
@@ -106,7 +107,8 @@ def main():
         output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='raymotion-') as temp:
             target=Path(temp)/'output.png' if ext=='.png' else Path(temp)
-            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:]])
+            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:]],
+                env=dict(os.environ, RAYMOTION_DEVICE=args.device))
             if ext=='.mp4':
                 target=Path(temp)/'output.mp4'
                 run(['ffmpeg','-hide_banner','-loglevel','error','-y','-framerate',args.framerate,'-i',Path(temp)/'f%08d.ppm','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target])

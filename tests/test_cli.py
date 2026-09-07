@@ -24,6 +24,6 @@ class CompilerTests(unittest.TestCase):
             self.assertNotEqual(subprocess.run([str(CLI),'init',d],capture_output=True).returncode,0)
             self.assertEqual(source,(Path(d)/'main.ray').read_text())
     def test_invalid_options(self):
-        for args in [('export','out.png','-h','0'),('export','out.gif'),('export','out.mp4','-w','3')]:
+        for args in [('export','out.png','-h','0'),('export','out.gif'),('export','out.png','--device','cuda'),('export','out.mp4','-w','3')]:
             self.assertNotEqual(subprocess.run([str(CLI),*args],capture_output=True).returncode,0)
 if __name__=='__main__': unittest.main()
