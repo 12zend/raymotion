@@ -530,6 +530,10 @@ HitInfo PathTracer::cast_ray(const Vec3& ro, const Vec3& rd, double dist) {
         hit.ar = t.ar;
         hit.ag = t.ag;
         hit.ab = t.ab;
+        if(t.texture) {
+            Vec3 c=t.texture->sample(w*t.tu0+hit.u*t.tu1+hit.v*t.tu2,w*t.tv0+hit.u*t.tv1+hit.v*t.tv2);
+            hit.ar*=c.x; hit.ag*=c.y; hit.ab*=c.z;
+        }
         hit.er = t.er;
         hit.eg = t.eg;
         hit.eb = t.eb;

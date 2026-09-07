@@ -6,9 +6,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
 #include <stdexcept>
 
-static_assert(sizeof(metal_data::Triangle)==136, "Metal triangle ABI mismatch");
+static_assert(sizeof(metal_data::Triangle)==172, "Metal triangle ABI mismatch");
 static_assert(sizeof(metal_data::BvhNode)==36, "Metal BVH ABI mismatch");
 static_assert(sizeof(metal_data::Params)==108, "Metal parameters ABI mismatch");
 namespace raymotion {
@@ -23,7 +24,7 @@ struct Context {
     std::string error;
     bool raytracing=false;
     std::mutex mutex;
-    id<MTLBuffer> buffers[5], image, vertices, scratch;
+    id<MTLBuffer> buffers[5], textures, image, vertices, scratch;
     id<MTLAccelerationStructure> acceleration;
     std::vector<metal_data::MetalVec3> previousPositions;
     unsigned refits=0;
@@ -80,6 +81,8 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
         Context& context; bool completed=false;
         ~CacheGuard() { if (!completed) { context.acceleration=nil; context.previousPositions.clear(); } }
     } guard{context};
+    std::vector<metal_data::MetalVec3> texels;
+    std::unordered_map<const Texture*,int> offsets;
     std::vector<metal_data::Triangle> tris(scene.tris.size());
     for(size_t i=0;i<tris.size();++i) {
         const auto& s=scene.tris[i]; auto& t=tris[i];
@@ -87,8 +90,16 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
         V(v0); V(v1); V(v2); V(n); V(nn); V(n0); V(n1); V(n2);
 #undef V
 #define F(field) t.field=s.field
+        F(tu0); F(tv0); F(tu1); F(tv1); F(tu2); F(tv2);
         F(ar); F(ag); F(ab); F(er); F(eg); F(eb); F(ior); F(rough); F(shader); F(metallic);
 #undef F
+        t.texture_offset=-1;
+        if(s.texture) {
+            auto inserted=offsets.emplace(s.texture.get(),int(texels.size()));
+            if(inserted.second) for(auto& pixel:s.texture->pixels) texels.push_back(pack(pixel));
+            t.texture_offset=inserted.first->second;
+            t.texture_width=s.texture->width; t.texture_height=s.texture->height;
+        }
     }
     // Preorder nodes with escape links allow stackless GPU traversal.
     std::vector<metal_data::BvhNode> nodes;
@@ -126,7 +137,8 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
         if (size) std::memcpy(target.contents,data,size);
         return true;
     };
-    if (!upload(context.buffers[0],tris.data(),tris.size()*sizeof(tris[0])) ||
+    if (!upload(context.textures,texels.data(),texels.size()*sizeof(texels[0])) ||
+        !upload(context.buffers[0],tris.data(),tris.size()*sizeof(tris[0])) ||
         !upload(context.buffers[1],nodes.data(),nodes.size()*sizeof(nodes[0])) ||
         !upload(context.buffers[2],scene.bvh_tri.data(),context.raytracing ? 0 : scene.bvh_tri.size()*sizeof(int)) ||
         !upload(context.buffers[3],scene.light_tri.data(),scene.light_tri.size()*sizeof(int)) ||
@@ -190,6 +202,7 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
     [encoder setBytes:&p length:sizeof(p) atIndex:5];
     [encoder setBytes:&seed length:sizeof(seed) atIndex:6];
     [encoder setBuffer:result offset:0 atIndex:7];
+    [encoder setBuffer:context.textures offset:0 atIndex:9];
     if (context.raytracing) [encoder setAccelerationStructure:context.acceleration atBufferIndex:8];
     NSUInteger width=std::min(NSUInteger(64),pipeline.maxTotalThreadsPerThreadgroup);
     size_t workItems=pixels*lanes;

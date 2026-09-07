@@ -3,6 +3,7 @@
 #include "raymotion/obj.hpp"
 #include "raymotion/bvh.hpp"
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <stdexcept>
 #include <filesystem>
@@ -22,19 +23,20 @@ public:
         : output(std::move(path)), video(movie), camera(renderer.camera) {
         renderer.configure(width,height,sample);
     }
-    Model init(const std::string& path) {
-        auto found=models.find(path);
+    Model init(const std::string& path, const std::string& mtl="") {
+        const std::string key=path+std::string(1,'\0')+mtl;
+        auto found=models.find(key);
         if(found!=models.end()) return found->second;
         auto model=std::make_shared<Scene>();
-        if(add_obj_file(*model,path,0,0,0,1,1,1,1,0,0,0,1,0.5,0)<0)
+        if((mtl.empty()?add_obj_file(*model,path,0,0,0,1,1,1,1,0,0,0,1,0.5,0):load_obj_materials(*model,path,mtl))<0)
             throw std::runtime_error("cannot load OBJ: "+path);
         if(model->tris.empty()) throw std::runtime_error("OBJ has no valid triangles: "+path);
-        models[path]=model;
+        models[key]=model;
         return model;
     }
     void push(const Model& model, Vec3 position={}, Vec3 rotation={}, Vec3 scale={1,1,1},
-              Vec3 albedo={1,1,1}, Vec3 emission={}, double refract=1,
-              double rougth=0.5, double metallic=0) {
+              Vec3 albedo={-1,-1,-1}, Vec3 emission={-1,-1,-1}, std::optional<double> refract={},
+              std::optional<double> rougth={}, std::optional<double> metallic={}) {
         if(!model) throw std::runtime_error("null object");
         if(scale.x==0 || scale.y==0 || scale.z==0) throw std::runtime_error("scale must be nonzero");
         topology.push_back(model.get());
@@ -49,9 +51,12 @@ public:
         auto point=[&](Vec3 v){return rotate({v.x*scale.x,v.y*scale.y,v.z*scale.z})+position;};
         auto normal=[&](Vec3 v){return normalize(rotate({v.x/scale.x,v.y/scale.y,v.z/scale.z}));};
         for(const auto& t:model->tris) {
-            renderer.scene.add_triangle(point(t.v0),point(t.v1),point(t.v2),
+            int index=renderer.scene.add_triangle(point(t.v0),point(t.v1),point(t.v2),
                 t.tu0,t.tv0,t.tu1,t.tv1,t.tu2,t.tv2,normal(t.n0),normal(t.n1),normal(t.n2),
-                albedo.x,albedo.y,albedo.z,emission.x,emission.y,emission.z,metallic,refract,rougth,0);
+                albedo.x<0?t.ar:albedo.x,albedo.y<0?t.ag:albedo.y,albedo.z<0?t.ab:albedo.z,
+                emission.x<0?t.er:emission.x,emission.y<0?t.eg:emission.y,emission.z<0?t.eb:emission.z,
+                metallic.value_or(t.metallic),refract.value_or(t.ior),rougth.value_or(t.rough),t.shader);
+            if(index>=0) renderer.scene.tris[index].texture=t.texture;
         }
     }
     void render() {

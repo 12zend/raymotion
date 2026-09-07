@@ -33,6 +33,11 @@ int main(int argc,char**) {
     quad(scene,{-2,-1,4},{-2,1,4},{-1,1,4},{-1,-1,4},{.8,.7,.3},{},1);
     quad(scene,{0,-1,4},{0,1,4},{1,1,4},{1,-1,4},{1,1,1},{},0,1.5,.02);
     quad(scene,{1,-1,5},{1,1,5},{2,1,5},{2,-1,5},{1,1,1},{},0,1.5,.3);
+    auto texture=std::make_shared<Texture>(); texture->width=2; texture->height=2;
+    texture->pixels={{1,.1,.1},{.1,1,.1},{.1,.1,1},{.5,.5,.5}};
+    for(auto& t:scene.tris) if(t.er+t.eg+t.eb==0) {
+        t.texture=texture;t.tu0=-.2;t.tv0=.1;t.tu1=1.4;t.tv1=.2;t.tu2=.3;t.tv2=1.7;
+    }
     build_bvh(scene,2);
     check(render_image_metal(scene,cam,cfg,12345,gpu,error),error.c_str());
     auto cpu=render_image_parallel(scene,cam,cfg,12345);

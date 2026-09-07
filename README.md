@@ -136,7 +136,27 @@ object.render();
 文字列・コメント内は変換しません。残りの構文はC++コンパイラで型検査します。
 診断には`main.ray`の行番号を出します。
 
-`object.init` はOBJを読み込みます。同じパスは一度だけ読み込み、複数インスタンスで共有します。
+`object.init(objPath, mtlPath = "")` はOBJと、省略可能なMTLを読み込みます。
+同じOBJ・MTLの組み合わせは一度だけ読み込み、複数インスタンスで共有します。
+
+```cpp
+void model = object.init("assets/model.obj", "assets/model.mtl");
+object.push(model, {0, 0, 3});
+```
+
+OBJの `usemtl` に従って、MTLの `Kd`（albedo）、`Ke`（emission）、
+`Ni`（refract）、`Pr`（rougth）、`Pm`（metallic）を適用します。
+`Pr` がない場合、`Ns` は `sqrt(2 / (Ns + 2))` でroughnessへ変換します。
+このレンダラーは屈折率が1.0001を超えると誘電体として扱います。
+`map_Kd` の画像パスはMTLのあるフォルダから解決します。PNG/JPEG/TGA/BMP/PPMなどを読み込み、
+sRGBから線形RGBへ変換して、OBJのUVでCPU・Metalの両方に反映します。
+画像は繰り返し・最近傍サンプリングでalbedoに乗算します。UVのない面には画像を適用しません。
+スペースを含む画像パスにも対応します。`map_Kd` のオプション、透過、その他のマップは未対応です。
+MTLは第2引数で明示指定します（`mtllib` の自動読み込みは行いません）。
+指定したMTLや画像を読み込めない場合はエラーにします。
+
+`push` のマテリアル引数を省略するとモデルの値を使い、明示指定するとその項目を上書きします。
+MTLなしのモデルは下表の従来の既定値になります。
 OBJのZ座標と面の巻き順は既存エンジンに合わせて反転されます。
 
 ```cpp
@@ -156,7 +176,7 @@ object.push(example, {0, 0, 3});      // 位置のみ
 | rougth | double | `0.5`（要求仕様の綴り） |
 | metallic | double | `0` |
 
-末尾引数の省略は生成C++のAPI既定引数で補完されます。
+末尾引数の省略は生成C++のAPI既定引数で補完されます（マテリアルはモデルから継承）。
 途中だけ省略する場合はその引数の既定値を明示してください。
 `Vec3{x,y,z}` または `{x,y,z}` が使えます。
 

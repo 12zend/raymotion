@@ -14,6 +14,8 @@ int add_obj_file(Scene& scene, const std::string& path, double ox, double oy, do
                  double scale, double ar, double ag, double ab, double er, double eg,
                  double eb, double ior, double rough, int shader, double metallic = 0);
 
+int load_obj_materials(Scene& scene, const std::string& obj, const std::string& mtl);
+
 // Parse OBJ text using the same rules as add_obj_file.
 int add_obj_tokens(Scene& scene, const std::string& data, double ox, double oy, double oz,
                    double scale, double ar, double ag, double ab, double er, double eg,

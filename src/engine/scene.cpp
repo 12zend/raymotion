@@ -6,6 +6,13 @@
 
 namespace raymotion {
 
+Vec3 Texture::sample(double u, double v) const {
+    u-=std::floor(u); v-=std::floor(v);
+    int x=std::min(int(u*width),width-1);
+    int y=height-1-std::min(int(v*height),height-1);
+    return pixels[size_t(y)*width+x];
+}
+
 int Scene::add_triangle(const Vec3& p0, const Vec3& p1, const Vec3& p2, double u0,
                         double v0, double u1, double v1, double u2, double v2,
                         const Vec3& n0, const Vec3& n1, const Vec3& n2, double ar,

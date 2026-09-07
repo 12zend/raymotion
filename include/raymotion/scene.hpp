@@ -5,6 +5,7 @@
 // C++ では 0-indexed の vector<Triangle> + vector<Node> に正規化する.
 // フィールド名は goboscript 側と対応付けてある.
 
+#include <memory>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -16,7 +17,14 @@ namespace raymotion {
 
 // 1 三角形. renderer.gs の addtriangle___... proc が add する全リストを集約.
 // 使われない UV (u0..v2) と正規化済み幾何法線 (nnx..nnz) も互換のため保持する.
+struct Texture {
+    int width=0, height=0;
+    std::vector<Vec3> pixels; // linear RGB, top row first
+    Vec3 sample(double u, double v) const;
+};
+
 struct Triangle {
+    std::shared_ptr<const Texture> texture;
     // 頂点
     Vec3 v0, v1, v2;
     // 幾何法線 (非正規化 cross) と平面係数 d. tri_nx/ny/nz, tri_d に対応.
@@ -28,7 +36,7 @@ struct Triangle {
     double denom = 0;
     // 正規化済み幾何法線. tri_nnx..nnz に対応 (現行シェーディングでは未使用).
     Vec3 nn;
-    // UV. tri_u0..v2 に対応 (現行シェーディングでは未使用).
+    // UV. map_Kd のサンプリングに使用.
     double tu0 = 0, tv0 = 0, tu1 = 0, tv1 = 0, tu2 = 0, tv2 = 0;
     // 頂点法線. tri_nx0..nz2 に対応.
     Vec3 n0, n1, n2;

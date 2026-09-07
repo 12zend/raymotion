@@ -104,6 +104,7 @@ struct PathTracer {
  primitive_acceleration_structure acceleration;
 #endif
  device const Triangle* tris;
+ device const MetalVec3* textures;
  device const BvhNode* nodes;
  device const int* indices;
  device const int* lights;
@@ -171,6 +172,14 @@ HitInfo cast_ray(float3 ro, float3 rd, float dist) {
         hit.ar = t.ar;
         hit.ag = t.ag;
         hit.ab = t.ab;
+        if(t.texture_offset>=0) {
+            float u=fract(w*t.tu0+hit.u*t.tu1+hit.v*t.tu2);
+            float v=fract(w*t.tv0+hit.u*t.tv1+hit.v*t.tv2);
+            int x=min(int(u*t.texture_width),t.texture_width-1);
+            int y=t.texture_height-1-min(int(v*t.texture_height),t.texture_height-1);
+            MetalVec3 c=textures[t.texture_offset+y*t.texture_width+x];
+            hit.ar*=c.x; hit.ag*=c.y; hit.ab*=c.z;
+        }
         hit.er = t.er;
         hit.eg = t.eg;
         hit.eb = t.eb;
@@ -565,7 +574,7 @@ float3 sample_sensor(float sx, float sy, Camera cam,
     return pathtrace({cam.x, cam.y, cam.z}, rd, max_bounces);
 }
 };
-kernel void render_paths(device const Triangle* tris [[buffer(0)]], device const BvhNode* nodes [[buffer(1)]], device const int* indices [[buffer(2)]], device const int* lights [[buffer(3)]], device const float* cdf [[buffer(4)]], constant Params& params [[buffer(5)]], constant ulong& seed [[buffer(6)]], device uchar* output [[buffer(7)]], uint id [[thread_position_in_grid]]
+kernel void render_paths(device const Triangle* tris [[buffer(0)]], device const BvhNode* nodes [[buffer(1)]], device const int* indices [[buffer(2)]], device const int* lights [[buffer(3)]], device const float* cdf [[buffer(4)]], constant Params& params [[buffer(5)]], constant ulong& seed [[buffer(6)]], device uchar* output [[buffer(7)]], device const MetalVec3* textures [[buffer(9)]], uint id [[thread_position_in_grid]]
 #if USE_METAL_RT
  , primitive_acceleration_structure acceleration [[buffer(8)]]
 #endif
@@ -576,7 +585,7 @@ kernel void render_paths(device const Triangle* tris [[buffer(0)]], device const
 #if USE_METAL_RT
  pt.acceleration=acceleration;
 #endif
- pt.tris=tris; pt.nodes=nodes; pt.indices=indices; pt.lights=lights; pt.cdf=cdf; pt.params=params;
+ pt.textures=textures; pt.tris=tris; pt.nodes=nodes; pt.indices=indices; pt.lights=lights; pt.cdf=cdf; pt.params=params;
  pt.rng_.seed(seed^(ulong(y+1)*0x9E3779B97F4A7C15UL)^(ulong(x+1)*0xBF58476D1CE4E5B9UL));
  float3 sum=0; float sum_l=0,sum_l2=0; int n=0;
  for(int s=0;s<params.spp;++s) {
@@ -600,7 +609,7 @@ kernel void render_paths(device const Triangle* tris [[buffer(0)]], device const
 // Specialized to 8 lanes for adaptive sampling, 32 for uniform high-spp work.
 // XOR reductions never cross a pixel's subgroup.
 constant uint pixel_lanes [[function_constant(0)]];
-kernel void render_paths_simd(device const Triangle* tris [[buffer(0)]], device const BvhNode* nodes [[buffer(1)]], device const int* indices [[buffer(2)]], device const int* lights [[buffer(3)]], device const float* cdf [[buffer(4)]], constant Params& params [[buffer(5)]], constant ulong& seed [[buffer(6)]], device uchar* output [[buffer(7)]], uint id [[thread_position_in_grid]]
+kernel void render_paths_simd(device const Triangle* tris [[buffer(0)]], device const BvhNode* nodes [[buffer(1)]], device const int* indices [[buffer(2)]], device const int* lights [[buffer(3)]], device const float* cdf [[buffer(4)]], constant Params& params [[buffer(5)]], constant ulong& seed [[buffer(6)]], device uchar* output [[buffer(7)]], device const MetalVec3* textures [[buffer(9)]], uint id [[thread_position_in_grid]]
 #if USE_METAL_RT
  , primitive_acceleration_structure acceleration [[buffer(8)]]
 #endif
@@ -611,7 +620,7 @@ kernel void render_paths_simd(device const Triangle* tris [[buffer(0)]], device 
 #if USE_METAL_RT
  pt.acceleration=acceleration;
 #endif
- pt.tris=tris; pt.nodes=nodes; pt.indices=indices; pt.lights=lights; pt.cdf=cdf; pt.params=params;
+ pt.textures=textures; pt.tris=tris; pt.nodes=nodes; pt.indices=indices; pt.lights=lights; pt.cdf=cdf; pt.params=params;
 
  pt.rng_.seed(seed^(ulong(y+1)*0x9E3779B97F4A7C15UL)^(ulong(x+1)*0xBF58476D1CE4E5B9UL)^(ulong(lane)*0x94D049BB133111EBUL));
  float3 sum=0; float sum_l=0,sum_l2=0; int n=0;

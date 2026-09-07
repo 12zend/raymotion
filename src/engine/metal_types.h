@@ -6,6 +6,8 @@ struct Triangle {
     MetalVec3 v0, v1, v2, n, nn, n0, n1, n2;
     float ar, ag, ab, er, eg, eb, ior, rough, metallic;
     int shader;
+    float tu0,tv0,tu1,tv1,tu2,tv2;
+    int texture_offset,texture_width,texture_height;
 };
 struct Camera {
     float x, y, z, focal;
