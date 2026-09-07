@@ -62,6 +62,18 @@ if(camera.x!=0 || camera.y!=0 || camera.z!=0 ||
     push='object.push(model, {0,0,3}, {0,0,0}, {1,1,1}, {1,0,0}, {1,0,0});\nobject.render();\n'
     (root/'main.ray').write_text(base+push)
     run('build')
+    executable=root/'.raymotion/build/main'
+    built=executable.stat().st_mtime_ns
+    run('build')
+    assert executable.stat().st_mtime_ns==built, 'unchanged build was recompiled'
+    # Local header changes must invalidate the executable cache.
+    (root/'settings.h').write_text('#define TEST_VALUE 1\n')
+    original=(root/'main.ray').read_text()
+    (root/'main.ray').write_text('#include "settings.h"\nstatic_assert(TEST_VALUE == 1);\n'+original)
+    run('build')
+    (root/'settings.h').write_text('#define TEST_VALUE 2\n')
+    run('build',ok=False)
+    (root/'main.ray').write_text(original)
     run('export','image with spaces.png','-w','32','-h','24','-s','1')
     data=(root/'image with spaces.png').read_bytes()
     assert data[:8]==b'\x89PNG\r\n\x1a\n'

@@ -63,43 +63,12 @@ struct BvhNode {
     bool is_leaf() const { return count > 0; }
 };
 
-// 高速走査用の float SoA キャッシュ (build_bvh の最後に構築。画像は不変).
-// 走査・交差判定のみに使い、シェーディングは従来通り double の Triangle を参照する.
-// 32B パック (キャッシュライン分割を避ける): internal は a=left,b=right,
-// leaf は a=offset,b=count (count>0 で leaf 判定).
-struct FastNode {
-    float mnx, mny, mnz, mxx, mxy, mxz;
-    int a = -1;
-    int b = 0;
-};
-
-// 4分木 BVH (二分木を孫併合で 4 分岐化). NEON で 4 子を 1 パス判定する.
-// child[i]>=0: 内部子. cnt[i]>0: 葉 (fidx の offset..+cnt). cnt[i]==0: 内部子.
-// cnt[i]==-1: 空スロット (判定常に失敗).
-struct FastNode4 {
-    float mnx[4], mxx[4], mny[4], mxy[4], mnz[4], mxz[4];
-    int child[4];
-    int offset[4];
-    int cnt[4];
-};
-struct FastTri {
-    float v0x, v0y, v0z;
-    float e1x, e1y, e1z;  // v1-v0
-    float e2x, e2y, e2z;  // v2-v0
-};
-
 struct Scene {
     std::vector<Triangle> tris;
     // BVH
     std::vector<BvhNode> nodes;
     std::vector<int> bvh_tri;  // 三角形インデックス列 (goboscript の bvhtri に対応, 0-based)
     int max_leaf_tris = 8;     // generatebvhtree tri 引数. init では 4 (高速化のため既定 8)
-    // float 走査キャッシュ (build_bvh が充填)
-    std::vector<FastNode> fnodes;
-    std::vector<FastNode4> fnodes4;
-    std::vector<FastTri> ftris;
-    std::vector<int> fidx;  // bvh_tri の複製 (走査側の所有でキャッシュ局所性を保つ)
-
     // エミッシブ CDF. light_tri/light_cdf, pt_light_total に対応.
     std::vector<int> light_tri;  // 発光三角形のインデックス
     std::vector<double> light_cdf;
@@ -114,10 +83,6 @@ struct Scene {
     void clear_bvh() {
         nodes.clear();
         bvh_tri.clear();
-        fnodes.clear();
-        fnodes4.clear();
-        ftris.clear();
-        fidx.clear();
     }
 
     // addtriangle___texcoords_normals___material___shader に対応.

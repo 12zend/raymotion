@@ -10,7 +10,6 @@
 #include <iostream>
 #include <mutex>
 #include <sstream>
-#include <thread>
 
 #include "raymotion/bvh.hpp"
 #include "raymotion/obj.hpp"
@@ -33,30 +32,13 @@ void Renderer::configure(int width, int height, int spp, int bounces) {
     if (bounces > 0) config.max_bounces = bounces;
 }
 
-int Renderer::effective_threads() const {
-    if (threads > 0) return threads;
-    int n = (int)std::thread::hardware_concurrency();
-    return n > 0 ? n : 4;
-}
-
 std::vector<uint8_t> Renderer::render(uint64_t seed, ProgressFn progress) {
-    const char* setting = std::getenv("RAYMOTION_DEVICE");
-    std::string device = setting ? setting : "auto";
-    if (device != "auto" && device != "cpu" && device != "metal")
-        throw std::invalid_argument("RAYMOTION_DEVICE must be auto, cpu, or metal");
-    if (device != "cpu") {
-        std::vector<uint8_t> image;
-        std::string error;
-        if (render_image_metal(scene, camera, config, seed, image, error)) {
-            if (progress) progress(config.height, config.height);
-            return image;
-        }
-        if (device == "metal") throw std::runtime_error("Metal: " + error);
-        static std::once_flag warning;
-        std::call_once(warning, [&] { std::cerr << "raymotion: using CPU (" << error << ")\n"; });
-    }
-    return render_image_parallel(scene, camera, config, seed, effective_threads(),
-                                 std::move(progress));
+    std::vector<uint8_t> image;
+    std::string error;
+    if (!render_image_metal(scene, camera, config, seed, image, error))
+        throw std::runtime_error("Metal: " + error);
+    if (progress) progress(config.height, config.height);
+    return image;
 }
 
 bool Renderer::render_to_ppm(const std::string& path, uint64_t seed,
@@ -80,12 +62,14 @@ bool Renderer::render_sequence(const std::vector<Camera>& cameras,
     std::atomic<int> done{0};
     std::mutex io_mu;
     bool ok = true;
-    // フレーム並列はメモリ増大を招くため、フレームは逐次・行を並列にする.
+    // Render each frame on Metal.
     for (size_t f = 0; f < cameras.size(); ++f) {
         char name[64];
         std::snprintf(name, sizeof(name), "%s%04d.ppm", basename.c_str(), (int)f);
-        auto img = render_image_parallel(scene, cameras[f], config,
-                                         seed + (uint64_t)f, effective_threads());
+        std::vector<uint8_t> img;
+        std::string error;
+        if (!render_image_metal(scene, cameras[f], config, seed + (uint64_t)f, img, error))
+            throw std::runtime_error("Metal: " + error);
         std::string err;
         if (!save_ppm((fs::path(out_dir) / name).string(), config.width,
                       config.height, img, &err)) {
@@ -110,10 +94,7 @@ bool Renderer::render_lerp_video(const Camera& a, const Camera& b,
         cams.push_back(lerp_camera(a, b, t));
     }
     std::string dir = opt.frames_dir.empty() ? out_mp4 + ".frames" : opt.frames_dir;
-    int saved_threads = threads;
-    if (opt.threads > 0) threads = opt.threads;
     bool ok = render_sequence(cams, dir, "f", opt.seed, progress);
-    threads = saved_threads;
     if (!ok) return false;
     std::string err;
     if (!encode_mp4(dir, "f", out_mp4, opt.fps, &err)) {
@@ -139,10 +120,7 @@ bool Renderer::render_orbit_video(const std::string& out_mp4, const Vec3& center
         cams.push_back(orbit_camera(camera, center, radius, height, ang));
     }
     std::string dir = opt.frames_dir.empty() ? out_mp4 + ".frames" : opt.frames_dir;
-    int saved_threads = threads;
-    if (opt.threads > 0) threads = opt.threads;
     bool ok = render_sequence(cams, dir, "f", opt.seed, progress);
-    threads = saved_threads;
     if (!ok) return false;
     std::string err;
     if (!encode_mp4(dir, "f", out_mp4, opt.fps, &err)) {

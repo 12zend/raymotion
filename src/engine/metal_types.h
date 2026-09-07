@@ -20,7 +20,7 @@ struct BvhNode {
 };
 struct Params {
     Camera camera;
-    int width, height, spp, bounces, nodes, lights, adapt_min, adapt_step, nomis;
+    int width, height, spp, bounces, nodes, lights, adapt_min, adapt_step, nomis, opaque;
     float light_total, resolution, clamp_value, adapt_rel, adapt_abs;
 };
 }

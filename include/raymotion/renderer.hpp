@@ -18,7 +18,6 @@ struct VideoOptions {
     uint64_t seed = 12345;  // 各フレーム seed + frame_index
     std::string frames_dir;  // 空なら一時ディレクトリ相当 (out.mp4 + ".frames")
     bool keep_frames = false;
-    int threads = 0;  // 0 = auto
 };
 
 // カメラ補間ヘルパー
@@ -32,7 +31,6 @@ public:
     Scene scene;
     Camera camera;
     RenderConfig config;
-    int threads = 0;  // 0 = hardware_concurrency
 
     Renderer();
 
@@ -43,7 +41,6 @@ public:
     // --- 設定 ---
     void configure(int width, int height, int spp = -1, int bounces = -1);
     void set_camera(const Camera& cam) { camera = cam; }
-    int effective_threads() const;
 
     // --- 静止画 ---
     std::vector<uint8_t> render(uint64_t seed = 12345, ProgressFn progress = {});

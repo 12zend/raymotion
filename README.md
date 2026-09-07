@@ -1,12 +1,12 @@
 # raymotion
 
-C++17へコンパイルするシーン記述言語と、Metal GPU / CPUパストレーシングCLIです。
+C++17へコンパイルするシーン記述言語と、Metal GPU専用パストレーシングCLIです。
 固定シーン・OBJ・カメラ軌道は同梱しません。
 
 ## ビルドとインストール
 
 必要: CMake 3.16以上、C++17コンパイラ、Python 3.9以上。
-MP4出力のみFFmpeg（libx264対応）が必要です。macOS / Linuxを対象にしています。
+MP4出力のみFFmpeg（libx264対応）が必要です。macOSを対象にしています。
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -20,7 +20,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## miseからのインストール
 
-`.github/workflows/release.yml` は `v*` タグのpushでOS・CPU別の配布アーカイブを
+`.github/workflows/release.yml` は `v*` タグのpushでmacOSのアーキテクチャ別の配布アーカイブを
 GitHub Releasesに生成します。CLI、C++ヘッダー、コンパイル済みエンジンを含みます。
 リポジトリの公開・タグのpush後に、`OWNER` を実際の所有者へ置き換えて実行します。
 この作業コピーにはGitリモートが設定されていないため、配布URLは未確定です。
@@ -46,7 +46,7 @@ raymotion export out.mp4 --width 1280 --height 720 --framerate 30 --sample 16
 `init` は `assets/` と `main.ray` を作成し、既存の `main.ray` を上書きしません。
 引数省略時は現在のディレクトリに生成します。
 `build` は現在のディレクトリの `main.ray` を読み、`.raymotion/build/main.cpp` と
-実行ファイル `main` を生成します。`export` は必ずこのビルドを行ってから実行します。
+実行ファイル `main` を生成します。`export` はビルドの更新を確認してから実行します。ソース・依存ヘッダー・エンジン・コンパイラが同じ場合は実行ファイルを再利用します。
 
 | オプション | デフォルト | 意味 |
 | --- | --- | --- |
@@ -55,7 +55,6 @@ raymotion export out.mp4 --width 1280 --height 720 --framerate 30 --sample 16
 | `-t / --time` | 10 | 動画の最大時間（秒、小数可） |
 | `-f / --framerate` | 30 | 動画FPS・プログラム内の`framerate` |
 | `-s / --sample` | 16 | 1ピクセルのサンプル数 |
-| `--device` | `auto` | `auto` / `metal` / `cpu` |
 
 ヘルプは `raymotion export --help`。`-h` は高さです。
 MP4のサイズは偶数が必要です。出力先の親フォルダは自動生成します。
@@ -64,28 +63,23 @@ PNGは `object.render()` 1回、MP4は1回以上必要です。
 
 ## Metal GPUによる高速化
 
-macOSではMetalを自動選択します。GPUを利用できない場合は理由を表示し、CPUへ
-フォールバックします。`--device metal` を指定した場合はGPU利用に失敗するとエラーに
-なるため、GPUで動いていることを確認できます。LinuxはCPUで動作します。
+描画はMetal専用です。GPUを利用できない場合はエラーになります。
+`--device` と `RAYMOTION_DEVICE` による選択、CPU専用ビルドは廃止しました。
+C++17コンパイラはシーンプログラムのビルドに引き続き必要です。
 
 ```sh
-raymotion export out.png -w 1280 -h 720 -s 128 --device metal
-raymotion export out.mp4 -w 1280 -h 720 -s 32 --device metal
-raymotion export out.png --device cpu
+raymotion export out.png -w 1280 -h 720 -s 128
+raymotion export out.mp4 -w 1280 -h 720 -s 32
 ```
 
-`RAYMOTION_DEVICE=cpu|metal|auto` でも指定でき、CLIの明示指定が優先します。
-Metal対応版は通常のCMakeビルドで生成されます。CPU専用ビルドは
-`-DRAYMOTION_METAL=OFF` を指定してください。シェーダーをライブラリ内へ埋め込むため、
-インストール先への `.metal` 配置や、XcodeのオフラインMetalコンパイラは不要です。
-初回描画時にGPU用パイプラインをコンパイルし、同じプロセス内では再利用します。
+シェーダーはライブラリへ埋め込み、初回描画時にGPU用パイプラインをコンパイルします。
 
 対応GPUではMetalのレイトレーシングAPIを使用し、非対応GPUではMetal compute上で
 スタック不要のBVH走査を実行します。MetalレイトレーシングAPIはmacOS 11以降が対象です。
 M1でも動作し、レイトレーシング専用ハードウェアの搭載は必須ではありません。
 1画素を8または32レーンで分担し、GPU向け32bit乱数生成とfloat演算を使います。
 拡散反射、GGX金属、粗い／滑らかな屈折、発光、直接照明・MIS、クランプ、適応サンプリングを
-実装しています。乱数列・演算精度がCPUと異なるため、画像はビット単位では一致しません。
+実装しています。
 
 GPUバッファとパイプラインはフレーム間で再利用します。頂点が変化しないフレームでは
 Metal加速構造を再利用し、同じ三角形数で頂点が変化した場合はrefitします。
@@ -94,30 +88,16 @@ OBJ読み込み・オブジェクト変換・CPU側BVH更新・画像保存・FF
 そのため、小さな画像や低サンプル数、コンパイル・動画エンコードが支配的な処理では
 全体の短縮率が小さくなる場合があります。
 
-2026-09-07、MacBook Air M1（8 CPUコア / 7 GPUコア）、Releaseビルドでの測定です。
-128 spp・適応サンプリング無効、初回ウォームアップ後の3回の中央値。
-CPUは全コアを使用。GPUへのシーン転送と結果読出しを含み、シェーダー／C++コンパイル、
-CPU BVH構築、PNG保存、動画エンコードは含みません。速度比はシーン・GPU・設定に依存します。
-
-| シーン | CPU | Metal | 速度比 |
-| --- | ---: | ---: | ---: |
-| 2,500三角形、320×240 | 0.620秒 | 0.174秒 | 3.56倍 |
-| 拡散・金属・ガラス・面光源、640×360 | 2.657秒 | 0.589秒 | 4.51倍 |
-
-初回フレーム（パイプライン作成後、加速構造の構築を含む）は、それぞれ
-CPU 0.608秒 / Metal 0.238秒、CPU 2.785秒 / Metal 0.621秒でした。
-
-検証・ベンチマーク:
+検証:
 
 ```sh
-RAYMOTION_REQUIRE_METAL=1 ./build/test_metal --benchmark
-RAYMOTION_DEVICE=metal python3 tests/smoke_export.py /absolute/path/to/bin/raymotion
+RAYMOTION_REQUIRE_METAL=1 ctest --test-dir build --output-on-failure
+python3 tests/smoke_export.py /absolute/path/to/bin/raymotion
 ```
 
-`test_metal` は空シーン、材質のCPU比較、再現性、適応サンプリング、端数サイズ、
-34フレームの更新を検証します。GPUがない環境ではCTestでスキップし、
-`RAYMOTION_REQUIRE_METAL=1` ではGPU不在も失敗にします。
-`RAYMOTION_METAL_TRAVERSAL=software` を指定すると、compute版BVHの検証もできます。
+Metalテストは空シーン、材質、再現性、透過の期待値、適応サンプリング、端数サイズ、
+34フレームの更新を検証します。
+`RAYMOTION_METAL_TRAVERSAL=software` を指定すると、Metal compute版BVHも検証できます。
 
 ## 言語
 
@@ -150,7 +130,7 @@ OBJの `usemtl` に従って、MTLの `Kd`（albedo）、`Ke`（emission）、
 `Pr` がない場合、`Ns` は `sqrt(2 / (Ns + 2))` でroughnessへ変換します。
 このレンダラーは屈折率が1.0001を超えると誘電体として扱います。
 `map_Kd` の画像パスはMTLのあるフォルダから解決します。PNG/JPEG/TGA/BMP/PPMなどを読み込み、
-sRGBから線形RGBへ変換して、OBJのUVでCPU・Metalの両方に反映します。
+sRGBから線形RGBへ変換して、OBJのUVでMetalに反映します。
 画像は繰り返し・最近傍サンプリングでalbedoに乗算します。UVのない面には画像を適用しません。
 スペースを含む画像パスにも対応します。`map_Kd` のオプション、透過、その他のマップは未対応です。
 MTLは第2引数で明示指定します（`mtllib` の自動読み込みは行いません）。
@@ -179,7 +159,7 @@ object.push(example, {0, 0, 3});      // 位置のみ
 | alpha | double | `1`（不透明） |
 
 `alpha` は `0` で完全透明、`1` で不透明、`0.5` で半透明です。範囲外は0〜1に制限します。
-CPU・Metalともに面ごとの透過を描画し、影と発光にも反映します。屈折は `refract` で別途指定します。
+Metalで面ごとの透過を描画し、影と発光にも反映します。屈折は `refract` で別途指定します。
 閉じた形状では手前と奥の面それぞれに適用されます。
 
 ```cpp

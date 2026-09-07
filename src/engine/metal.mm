@@ -3,6 +3,7 @@
 #include "raymotion/metal.hpp"
 #include "metal_types.h"
 #include "metal_source.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -11,7 +12,7 @@
 
 static_assert(sizeof(metal_data::Triangle)==176, "Metal triangle ABI mismatch");
 static_assert(sizeof(metal_data::BvhNode)==36, "Metal BVH ABI mismatch");
-static_assert(sizeof(metal_data::Params)==108, "Metal parameters ABI mismatch");
+static_assert(sizeof(metal_data::Params)==112, "Metal parameters ABI mismatch");
 namespace raymotion {
 namespace {
 std::string diagnostic(NSError* e) {
@@ -128,6 +129,7 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
     p.resolution=cfg.resolution; p.clamp_value=cfg.clamp; p.adapt_rel=cfg.adapt_rel; p.adapt_abs=cfg.adapt_abs;
     p.adapt_min=std::getenv("UOW2_NOADAPT") ? 0 : cfg.adapt_min;
     p.adapt_step=cfg.adapt_step>0 ? cfg.adapt_step : 8;
+    p.opaque=std::all_of(tris.begin(),tris.end(),[](const auto& t) { return t.alpha>=1; });
     p.nomis=std::getenv("UOW2_NOMIS")!=nullptr;
     auto upload=[&](id<MTLBuffer> __strong& target,const void* data,size_t size) -> bool {
         size_t capacity=std::max(size_t(4),size);
@@ -204,7 +206,7 @@ bool render_image_metal(const Scene& scene, const Camera& cam, const RenderConfi
     [encoder setBuffer:result offset:0 atIndex:7];
     [encoder setBuffer:context.textures offset:0 atIndex:9];
     if (context.raytracing) [encoder setAccelerationStructure:context.acceleration atBufferIndex:8];
-    NSUInteger width=std::min(NSUInteger(64),pipeline.maxTotalThreadsPerThreadgroup);
+    NSUInteger width=std::min(NSUInteger(256),pipeline.maxTotalThreadsPerThreadgroup);
     size_t workItems=pixels*lanes;
     [encoder dispatchThreadgroups:MTLSizeMake((workItems+width-1)/width,1,1) threadsPerThreadgroup:MTLSizeMake(width,1,1)];
     [encoder endEncoding]; [command commit]; [command waitUntilCompleted];

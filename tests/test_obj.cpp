@@ -23,9 +23,6 @@ int main() {
     check(t.texture->sample(-.75,1.25).z==1,"UV wrapping");
     double gray=t.texture->sample(.75,.25).x;
     check(gray>.215 && gray<.217,"sRGB decoding");
-    Scene scene=*model;build_bvh(scene);PathTracer tracer(&scene);
-    auto hit=tracer.cast_ray({.1,.1,-1},{0,0,1},10);
-    check(hit.hit && hit.ar==0 && hit.ag==0 && hit.ab==1,"CPU texture sampling");
     objects.push(model,{0,0,3});
     objects.push(model,{0,0,3},{},{1,1,1},{1,1,1},{},1,.5,0);
     objects.render();

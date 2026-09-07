@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """raymotion: compile .ray programs to C++ and render frames."""
 import argparse
+import hashlib
+import json
+import shlex
 from decimal import Decimal, InvalidOperation
 import os
 from pathlib import Path
@@ -62,7 +65,9 @@ def build():
     source=Path('main.ray')
     if not source.is_file(): raise ValueError('main.ray not found; run raymotion init first')
     folder=Path('.raymotion/build').resolve(); folder.mkdir(parents=True,exist_ok=True)
-    cpp=folder/'main.cpp'; cpp.write_text(transpile(source.read_text()))
+    cpp=folder/'main.cpp'
+    generated=transpile(source.read_text())
+    if not cpp.exists() or cpp.read_text()!=generated: cpp.write_text(generated)
     here=Path(__file__).resolve()
     prefix=here.parent.parent
     if (prefix/'lib/libraymotion_engine.a').is_file():
@@ -75,7 +80,31 @@ def build():
         run(['cmake','--build',engine,'--parallel'])
         library=engine/'libraymotion_engine.a'
     executable=folder/'main'
-    run([os.environ.get('CXX','c++'),'-std=c++17','-O3','-pthread','-I',Path.cwd(),'-I',prefix/'include',cpp,library,*(['-framework','Foundation','-framework','Metal'] if sys.platform=='darwin' else []),'-o',executable])
+    dependencies=folder/'main.d'
+    manifest=folder/'main.cache.json'
+    compiler=os.environ.get('CXX','c++')
+    command=[compiler,'-std=c++17','-O3','-pthread','-I',str(Path.cwd()),'-I',str(prefix/'include'),
+             '-MMD','-MF',str(dependencies),str(cpp),str(library),
+             '-framework','Foundation','-framework','Metal','-o',str(executable)]
+    def fingerprint():
+        if not dependencies.exists(): return None
+        # Compiler dependency files escape spaces and continue long lines.
+        names=shlex.split(dependencies.read_text().replace('\\\n','').split(':',1)[1])
+        names += [str(library),shutil.which(compiler) or compiler]
+        try:
+            return {name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in names}
+        except OSError:
+            return None
+    current={'command':command,'dependencies':fingerprint()}
+    try:
+        cached=json.loads(manifest.read_text())
+    except (OSError,ValueError):
+        cached=None
+    if not executable.exists() or current['dependencies'] is None or cached!=current:
+        # Invalidate before compiling so a failed build cannot reuse an old executable.
+        manifest.unlink(missing_ok=True)
+        run(command)
+        manifest.write_text(json.dumps({'command':command,'dependencies':fingerprint()}))
     return executable
 
 def positive(value):
@@ -103,7 +132,6 @@ def main():
     export.add_argument('-t','--time',type=positive_seconds,default=Decimal('10'),
                         help='maximum video duration in seconds (default: 10)')
     export.add_argument('output',type=Path)
-    export.add_argument('--device',choices=['auto','cpu','metal'],default=os.environ.get('RAYMOTION_DEVICE','auto'))
     for short,long,default in [('w','width',640),('h','height',360),('f','framerate',30),('s','sample',16)]:
         export.add_argument('-'+short,'--'+long,type=positive,default=default)
     args=parser.parse_args()
@@ -132,8 +160,7 @@ def main():
         output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='raymotion-') as temp:
             target=Path(temp)/'output.png' if ext=='.png' else Path(temp)
-            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:],max_frames],
-                env=dict(os.environ, RAYMOTION_DEVICE=args.device))
+            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:],max_frames])
             if ext=='.mp4':
                 target=Path(temp)/'output.mp4'
                 run(['ffmpeg','-hide_banner','-loglevel','error','-y','-framerate',args.framerate,'-i',Path(temp)/'f%08d.ppm','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target])

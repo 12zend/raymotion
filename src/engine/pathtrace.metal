@@ -1,4 +1,4 @@
-// Metal float port of pathtrace.cpp; keep BSDF, MIS and sampling changes in sync.
+// Metal path tracing, BSDF, MIS and adaptive sampling.
 #include <metal_stdlib>
 using namespace metal;
 #if USE_METAL_RT
@@ -332,7 +332,8 @@ void direct_lighting(float p_x, float p_y, float p_z, float n_x,
     float pdf =
         dist * dist * lt_lum / (lcos * (float)params.light_total);
     float sox = p_x + n_x * 0.002f, soy = p_y + n_y * 0.002f, soz = p_z + n_z * 0.002f;
-    if (cast_alpha_ray({sox, soy, soz}, {ldx, ldy, ldz}, dist - 0.003f).tri >= 0) return;
+    if (params.opaque ? cast_shadow_ray({sox, soy, soz}, {ldx, ldy, ldz}, dist - 0.003f)
+                      : cast_alpha_ray({sox, soy, soz}, {ldx, ldy, ldz}, dist - 0.003f).tri >= 0) return;
     float sp = spec_prob;
     float r2 = rough;
     if (r2 < 0) r2 = 0;
@@ -417,6 +418,7 @@ DielectricSample sample_dielectric(
 }
 // Stochastic surface coverage. Transparent crossings do not consume bounces.
 HitInfo cast_alpha_ray(float3 ro, float3 rd, float dist) {
+    if (params.opaque) return cast_ray(ro, rd, dist);
     float traveled = 0;
     while (traveled < dist) {
         HitInfo hit = cast_ray(ro + rd * traveled, rd, dist - traveled);

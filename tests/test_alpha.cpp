@@ -1,3 +1,4 @@
+#include <raymotion/metal.hpp>
 #include <raymotion/runtime.hpp>
 #include <cmath>
 #include <stdexcept>
@@ -11,20 +12,21 @@ void surface(Scene& s, double z, double alpha, Vec3 emission) {
 int main() {
     for(double opacity : {0., .5, 1.}) {
         Scene s; surface(s,1,opacity,{1,0,0}); surface(s,2,1,{0,1,0}); build_bvh(s);
-        PathTracer pt(&s,12345); Vec3 sum{};
-        int blocked=0;
-        for(int i=0;i<20000;++i) {
-            sum=sum+pt.pathtrace({0,0,0},{0,0,1},1);
-            blocked+=pt.cast_alpha_ray({0,0,0},{0,0,1},1.5).tri>=0;
-        }
-        check(std::abs(sum.x/20000-opacity)<.02);
-        check(std::abs(sum.y/20000-(1-opacity))<.02);
-        check(std::abs(blocked/20000.-opacity)<.02);
+        RenderConfig cfg; cfg.width=8; cfg.height=8; cfg.spp=4096; cfg.adapt_min=0;
+        Camera camera; std::vector<uint8_t> image; std::string error;
+        check(render_image_metal(s,camera,cfg,12345,image,error));
+        double red=0,green=0;
+        for(size_t i=0;i<image.size();i+=3) {red+=image[i];green+=image[i+1];}
+        check(std::abs(red/64-255*opacity/(1+opacity))<3);
+        check(std::abs(green/64-255*(1-opacity)/(2-opacity))<3);
     }
     Scene layers;
     for(int i=0;i<64;++i) surface(layers,1+i*.01,0,{1,0,0});
     surface(layers,2,1,{0,1,0}); build_bvh(layers);
-    PathTracer pt(&layers); check(pt.pathtrace({0,0,0},{0,0,1},1).y==1);
+    RenderConfig cfg; cfg.width=1;cfg.height=1;cfg.spp=1;
+    Camera camera;std::vector<uint8_t> image;std::string error;
+    check(render_image_metal(layers,camera,cfg,12345,image,error));
+    check(image[0]==0 && image[1]==127);
     Scene clamped; surface(clamped,1,-1,{}); surface(clamped,2,2,{});
     check(clamped.tris[0].alpha==0 && clamped.tris[1].alpha==1);
     Objects objects("unused.png",1,1,1,false);

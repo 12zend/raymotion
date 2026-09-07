@@ -24,7 +24,7 @@ inline double area_of(const Vec3& mn, const Vec3& mx) {
 
 }  // namespace
 
-static void refresh_cache(Scene& scene);
+
 
 void build_bvh(Scene& scene, int max_leaf_tris) {
     max_leaf_tris = std::max(1, max_leaf_tris);
@@ -245,115 +245,6 @@ void build_bvh(Scene& scene, int max_leaf_tris) {
         q.push({job.offset + mid, job.count - mid, right});
     }
 
-    refresh_cache(scene);
-}
-
-static void refresh_cache(Scene& scene) {
-    size_t n = scene.tris.size();
-    // ---- float 走査キャッシュを構築 ----
-    scene.ftris.resize(n);
-    for (size_t i = 0; i < n; ++i) {
-        const Triangle& t = scene.tris[i];
-        FastTri& f = scene.ftris[i];
-        f.v0x = (float)t.v0.x;
-        f.v0y = (float)t.v0.y;
-        f.v0z = (float)t.v0.z;
-        f.e1x = (float)(t.v1.x - t.v0.x);
-        f.e1y = (float)(t.v1.y - t.v0.y);
-        f.e1z = (float)(t.v1.z - t.v0.z);
-        f.e2x = (float)(t.v2.x - t.v0.x);
-        f.e2y = (float)(t.v2.y - t.v0.y);
-        f.e2z = (float)(t.v2.z - t.v0.z);
-    }
-    scene.fidx = scene.bvh_tri;
-    scene.fnodes.resize(scene.nodes.size());
-    for (size_t i = 0; i < scene.nodes.size(); ++i) {
-        const BvhNode& s = scene.nodes[i];
-        FastNode& d = scene.fnodes[i];
-        d.mnx = (float)s.mn.x;
-        d.mny = (float)s.mn.y;
-        d.mnz = (float)s.mn.z;
-        d.mxx = (float)s.mx.x;
-        d.mxy = (float)s.mx.y;
-        d.mxz = (float)s.mx.z;
-        if (s.count > 0) {
-            d.a = s.offset;
-            d.b = -s.count;  // leaf: 負値で count を保持 (internal の right>=1 と判別)
-        } else {
-            d.a = s.left;
-            d.b = s.right;
-        }
-    }
-
-    // ---- 4 分木化 (二分木の孫併合. 走査の NEON 4-wide 判定用) ----
-    // 葉の offset/count は二分木のものをそのまま参照 (bvh_tri 順序は不変).
-    // 注: 4 分木ノード数 <= 二分ノード数. push_back の再割当てで参照が無効化
-    // されるため, 上限で reserve しておく (n4 参照をループ中に保持するため).
-    scene.fnodes4.clear();
-    scene.fnodes4.reserve(scene.nodes.size());
-    scene.fnodes4.push_back(FastNode4{});
-    struct Job4 {
-        int bin;   // 元の二分ノード
-        int self;  // 割当済み 4 分木ノード
-    };
-    std::vector<Job4> stk4;
-    stk4.push_back({0, 0});
-    while (!stk4.empty()) {
-        Job4 job = stk4.back();
-        stk4.pop_back();
-        FastNode4& n4 = scene.fnodes4[(size_t)job.self];
-        int L = scene.nodes[(size_t)job.bin].left;
-        int R = scene.nodes[(size_t)job.bin].right;
-        int kids[4];
-        int nk = 0;
-        if (scene.nodes[(size_t)job.bin].is_leaf()) {
-            kids[nk++] = job.bin;
-        } else if (scene.nodes[(size_t)L].count == 0 && scene.nodes[(size_t)R].count == 0) {
-            kids[nk++] = scene.nodes[(size_t)L].left;
-            kids[nk++] = scene.nodes[(size_t)L].right;
-            kids[nk++] = scene.nodes[(size_t)R].left;
-            kids[nk++] = scene.nodes[(size_t)R].right;
-        } else {
-            kids[nk++] = L;
-            kids[nk++] = R;
-        }
-        for (int i = nk; i < 4; ++i) kids[i] = -1;
-        for (int i = 0; i < 4; ++i) {
-            int c = kids[i];
-            if (c < 0) {
-                n4.child[i] = -1;
-                n4.offset[i] = 0;
-                n4.cnt[i] = -1;
-                // 空スロットの bounds は親自身 (判定は cnt==-1 で潰す)
-                n4.mnx[i] = (float)scene.nodes[(size_t)job.bin].mn.x;
-                n4.mny[i] = (float)scene.nodes[(size_t)job.bin].mn.y;
-                n4.mnz[i] = (float)scene.nodes[(size_t)job.bin].mn.z;
-                n4.mxx[i] = (float)scene.nodes[(size_t)job.bin].mx.x;
-                n4.mxy[i] = (float)scene.nodes[(size_t)job.bin].mx.y;
-                n4.mxz[i] = (float)scene.nodes[(size_t)job.bin].mx.z;
-                continue;
-            }
-            const BvhNode& bc = scene.nodes[(size_t)c];
-            n4.mnx[i] = (float)bc.mn.x;
-            n4.mny[i] = (float)bc.mn.y;
-            n4.mnz[i] = (float)bc.mn.z;
-            n4.mxx[i] = (float)bc.mx.x;
-            n4.mxy[i] = (float)bc.mx.y;
-            n4.mxz[i] = (float)bc.mx.z;
-            if (bc.count > 0) {
-                n4.child[i] = -1;
-                n4.offset[i] = bc.offset;
-                n4.cnt[i] = bc.count;
-            } else {
-                int id = (int)scene.fnodes4.size();
-                scene.fnodes4.push_back(FastNode4{});
-                n4.child[i] = id;
-                n4.offset[i] = 0;
-                n4.cnt[i] = 0;
-                stk4.push_back({c, id});
-            }
-        }
-    }
 }
 
 void refit_bvh(Scene& scene) {
@@ -378,7 +269,6 @@ void refit_bvh(Scene& scene) {
         }
         node.mn=mn; node.mx=mx;
     }
-    refresh_cache(scene);
 }
 
 }  // namespace raymotion
