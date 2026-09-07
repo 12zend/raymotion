@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """raymotion: compile .ray programs to C++ and render frames."""
 import argparse
+from decimal import Decimal, InvalidOperation
 import os
 from pathlib import Path
 import re
@@ -33,15 +34,23 @@ def transpile(source):
 '''+''.join(includes)+'''using namespace raymotion;
 int main(int argc, char** argv) {
   try {
-    if(argc!=7) throw std::runtime_error("run this program with raymotion export");
+    if(argc!=8) throw std::runtime_error("run this program with raymotion export");
     const int width=std::stoi(argv[2]), height=std::stoi(argv[3]);
     const int sample=std::stoi(argv[4]), framerate=std::stoi(argv[5]);
-    Objects object(argv[1],width,height,sample,std::string(argv[6])=="mp4");
+    const bool video=std::string(argv[6])=="mp4";
+    Objects object(argv[1],width,height,sample,video,framerate,std::stoi(argv[7]));
     auto& camera=object.camera;
+    const auto& u_timer=object.u_timer;
+    const auto& u_resolution=object.u_resolution;
+    do {
+    const double frame_start=u_timer;
 #line 1 "main.ray"
 '''+''.join(lines)+'''
     object.finish();
+    if(u_timer==frame_start) throw std::runtime_error("no object.render() executed in this iteration");
+    } while(video);
     return 0;
+  } catch(const RenderComplete&) { return 0;
   } catch(const std::exception& e) { std::cerr << "raymotion: " << e.what() << "\\n"; return 1; }
 }
 '''
@@ -74,6 +83,15 @@ def positive(value):
     if n<=0: raise argparse.ArgumentTypeError('must be a positive integer')
     return n
 
+def positive_seconds(value):
+    try:
+        seconds = Decimal(value)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError('must be a positive finite number of seconds')
+    if not seconds.is_finite() or seconds <= 0:
+        raise argparse.ArgumentTypeError('must be a positive finite number of seconds')
+    return seconds
+
 def main():
     parser=argparse.ArgumentParser(prog='raymotion')
     parser.add_argument('--version',action='version',version='raymotion '+VERSION)
@@ -82,6 +100,8 @@ def main():
     sub.add_parser('build')
     export=sub.add_parser('export',add_help=False)
     export.add_argument('--help',action='help')
+    export.add_argument('-t','--time',type=positive_seconds,default=Decimal('10'),
+                        help='maximum video duration in seconds (default: 10)')
     export.add_argument('output',type=Path)
     export.add_argument('--device',choices=['auto','cpu','metal'],default=os.environ.get('RAYMOTION_DEVICE','auto'))
     for short,long,default in [('w','width',640),('h','height',360),('f','framerate',30),('s','sample',16)]:
@@ -100,14 +120,19 @@ def main():
         ext=args.output.suffix.lower()
         if ext not in ('.png','.mp4'): raise ValueError('output must end in .png or .mp4')
         if args.width*args.height>100_000_000: raise ValueError('image exceeds 100 million pixels')
+        max_frames=0
         if ext=='.mp4':
+            frame_count=args.time*args.framerate
+            if frame_count<1 or frame_count>2147483647:
+                raise ValueError('--time must allow between 1 and 2147483647 frames at this framerate')
+            max_frames=int(frame_count)
             if args.width%2 or args.height%2: raise ValueError('MP4 width and height must be even')
             if not shutil.which('ffmpeg'): raise ValueError('MP4 export requires ffmpeg in PATH')
         executable=build()
         output=args.output.resolve(); output.parent.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='raymotion-') as temp:
             target=Path(temp)/'output.png' if ext=='.png' else Path(temp)
-            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:]],
+            run([executable,target,args.width,args.height,args.sample,args.framerate,ext[1:],max_frames],
                 env=dict(os.environ, RAYMOTION_DEVICE=args.device))
             if ext=='.mp4':
                 target=Path(temp)/'output.mp4'

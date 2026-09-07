@@ -9,6 +9,11 @@
 #include <filesystem>
 
 namespace raymotion {
+// Signals successful completion after the configured video frame limit.
+struct RenderComplete {};
+
+struct Resolution { double x, y; };
+
 using Model = std::shared_ptr<const Scene>;
 class Objects {
     Renderer renderer;
@@ -17,10 +22,18 @@ class Objects {
     std::filesystem::path output;
     bool video;
     int frame = 0;
+    int framerate;
+    int max_frames;
+    double timer = 0;
 public:
     Camera& camera;
-    Objects(std::string path, int width, int height, int sample, bool movie)
-        : output(std::move(path)), video(movie), camera(renderer.camera) {
+    const double& u_timer = timer;
+    const Resolution u_resolution;
+    Objects(std::string path, int width, int height, int sample, bool movie, int fps = 30, int frame_limit = 0)
+        : output(std::move(path)), video(movie), framerate(fps), max_frames(frame_limit), camera(renderer.camera),
+          u_resolution{double(width), double(height)} {
+        if(fps <= 0) throw std::invalid_argument("framerate must be positive");
+        if(frame_limit < 0) throw std::invalid_argument("frame limit must be nonnegative");
         renderer.configure(width,height,sample);
     }
     Model init(const std::string& path, const std::string& mtl="") {
@@ -60,6 +73,7 @@ public:
         }
     }
     void render() {
+        if(video && max_frames > 0 && frame >= max_frames) throw RenderComplete{};
         if(!video && frame>0) throw std::runtime_error("PNG requires exactly one object.render()");
         if(topology==previous && frame%32!=0) refit_bvh(renderer.scene);
         else renderer.build();
@@ -72,7 +86,9 @@ public:
         } else ok=renderer.render_to_png(output.string());
         if(!ok) throw std::runtime_error("cannot write rendered frame");
         ++frame;
+        timer = double(frame) / framerate;
         renderer.scene.clear_triangles(); topology.clear();
+        if(video && max_frames > 0 && frame >= max_frames) throw RenderComplete{};
     }
     void finish() {if(frame==0) throw std::runtime_error("no object.render() executed");}
 };

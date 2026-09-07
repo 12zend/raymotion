@@ -52,6 +52,7 @@ raymotion export out.mp4 --width 1280 --height 720 --framerate 30 --sample 16
 | --- | --- | --- |
 | `-w / --width` | 640 | 横ピクセル数 |
 | `-h / --height` | 360 | 縦ピクセル数 |
+| `-t / --time` | 10 | 動画の最大時間（秒、小数可） |
 | `-f / --framerate` | 30 | 動画FPS・プログラム内の`framerate` |
 | `-s / --sample` | 16 | 1ピクセルのサンプル数 |
 | `--device` | `auto` | `auto` / `metal` / `cpu` |
@@ -214,17 +215,34 @@ double fov = camera.get.fov;
 
 CLIで指定した`width`、`height`、`sample`、`framerate`は読み取り専用変数です。
 
+`u_timer`と`u_resolution`も読み取り専用で参照できます。
+
+- `u_timer`（double）: 現在のフレーム時刻（秒）。最初は`0`で、`object.render()`が成功するたびに`1 / framerate`進みます。実際の処理時間には依存しません。
+- `u_resolution.x` / `u_resolution.y`（double）: 出力の幅 / 高さ（ピクセル）。CLIの`-w` / `-h`を反映します。
+
+```cpp
+double aspect = u_resolution.x / u_resolution.y;
+double angle = u_timer * 90;
+```
+
 ### 動画
 
 ```cpp
 void example = object.init("assets/model.obj");
 for (int frame = 0; frame < framerate * 2; ++frame) {
-    double time = double(frame) / framerate;
-    object.push(example, {0, 0, 3}, {0, time * 90, 0}, {1,1,1},
+    object.push(example, {0, 0, 3}, {0, u_timer * 90, 0}, {1,1,1},
                 {1,1,1}, {0.2,0.2,0.2});
     object.render();
 }
 ```
+
+`raymotion export out.mp4 -t 5`（または`--time 5`）で最大5秒の動画を出力します。
+省略時は最大10秒です。フレーム数は`time × framerate`の小数部分を切り捨て、
+1フレーム未満の指定はエラーになります。上限に達した`object.render()`でプログラムは正常終了し、
+以降のコードは実行されません。MP4では`main.ray`全体を上限まで繰り返し実行するため、
+`object.render()`を1回書くだけで動画を生成できます。各実行で時刻に応じた計算をやり直し、
+モデルの読み込みキャッシュとカメラは保持します。描画のない繰り返しはエラーになります。
+PNGでは`main.ray`を1回だけ実行し、時間制限は適用しません。これは動画の長さの上限であり、処理の実行時間制限ではありません。
 
 各`render()`が1フレームを出力し、pushキューを空にします。
 次フレームに表示するオブジェクトは再度pushしてください。モデルとカメラは保持されます。
