@@ -24,35 +24,33 @@ export PATH="$HOME/.local/bin:$PATH"
 
 インストールせず `./src/cli/raymotion` でも実行できます。
 
-## miseからのインストール
+## インストール・更新
 
-[miseのインストール・シェル設定](https://mise.jdx.dev/getting-started.html)を済ませてから実行します。
-[GitHub Releases](https://github.com/12zend/raymotion/releases)に配布アーカイブ付きの
-Releaseが公開されている必要があります。リポジトリの公開だけではインストールできません。
+次のコマンドで最新の[GitHub Release](https://github.com/12zend/raymotion/releases)をインストールします。
+更新時も同じコマンドを実行してください。配布アーカイブ付きのReleaseが必要です。
 
 ```sh
-mise use -g github:12zend/raymotion@latest
+curl -fsSL https://ray.kobajin.com/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
 raymotion --version
 ```
 
-miseの[GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html)を利用します。
-macOSのApple Silicon・Intelに対応し、対応するアーカイブを自動選択します。
+macOSのApple Silicon・Intelを自動判定し、SHA256チェックサムを検証します。
 利用先にもPython 3.9以上とC++17コンパイラが必要です。Release版はエンジンの再ビルド不要です。
 MP4出力にはFFmpeg（libx264対応）も必要です。
 
-### miseで更新する
+CLIは `~/.local/bin/raymotion`、ランタイムへのリンクは `~/.local/share/raymotion` に配置します。
+PATHの設定は利用するシェルの設定ファイル（zshなら `~/.zshrc`）にも追加してください。
+インストール先は `RAYMOTION_INSTALL_DIR`、CLIの配置先は `RAYMOTION_BIN_DIR` で
+絶対パスを指定できます（例: `curl -fsSL <URL> | RAYMOTION_INSTALL_DIR=/path/to/raymotion bash`）。
+更新前のランタイムはインストール先の親にある `.raymotion-*` ディレクトリに保持します。
 
-上記の `@latest` でインストールしたCLIは、新しいReleaseの公開後に更新できます。
+### インストーラーの配信（開発者向け）
 
-```sh
-mise upgrade github:12zend/raymotion
-raymotion --version
-```
-
-更新候補だけを確認する場合は `mise upgrade --dry-run github:12zend/raymotion` を使います。
-特定バージョンを固定している場合は、`mise use -g github:12zend/raymotion@latest` で
-最新追従に切り替えられます。プロジェクトの `mise.toml` に指定がある場合は、そちらが優先されます。
-詳細は[mise upgrade](https://mise.jdx.dev/cli/upgrade.html)を参照してください。
+`web/` を静的サイトの公開ディレクトリとして、`web/install.sh` を
+`https://ray.kobajin.com/install.sh` で配信します。
+将来 `raymotion.org` に移行する場合は、同じ `web/` を新ドメインで公開し、
+このREADMEのインストールURLを変更してください。スクリプト内の変更は不要です。
 
 ### 配布版を更新する条件（開発者向け）
 
@@ -65,12 +63,12 @@ raymotion --version
 
 アーカイブには `bin/` のCLI、`include/` のC++ヘッダー、`lib/` のエンジン、
 `share/raymotion/compiler/` のコンパイラをまとめて含めます。
-miseは外側の `raymotion/` を自動除去して `bin/` をPATHへ追加し、CLIは自身の配置から同梱ファイルを参照します。
+`web/install.sh` がアーカイブを展開してCLIへのリンクを配置し、CLIは自身の配置から同梱ファイルを参照します。
 
 更新時は `CMakeLists.txt` のプロジェクトバージョンと `src/cli/raymotion` の `VERSION` を揃え、
 対応する新しいバージョンタグ（例: `v0.1.1`）で配布してください。
 `VERSION` はタグから自動更新されません。通常の安定版タグを使い、既存タグ・Releaseの差し替えは避けます。
-mainへのpushだけではReleaseは作成されず、miseの更新対象にもなりません。
+mainへのpushだけではReleaseは作成されず、インストーラーの更新対象にもなりません。
 
 ## CLI
 
