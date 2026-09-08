@@ -1,5 +1,9 @@
 # Raymotion for VSCode
 
+[GitHub](https://github.com/12zend/raymotion) ·
+[CLIのインストール・更新](../README.md#miseからのインストール) ·
+[Issues](https://github.com/12zend/raymotion/issues)
+
 .rayファイルのC++17構文とRaymotion APIを、選択中のVSCodeカラーテーマで色付けします。
 C++標準TextMate grammarを再利用し、独自のモデル宣言・API・組み込み変数には標準のテーマ用scopeを追加します。
 
@@ -14,6 +18,8 @@ C++標準TextMate grammarを再利用し、独自のモデル宣言・API・組�
 VSCodeの「Extensions: Install from VSIX」で生成物をインストールします。
 配布版では `raymotion.runtimePath` にこのリポジトリ、または更新版Raymotionのインストールprefixを指定します。
 開発時の既定値はこのフォルダの親です。
+miseでCLIをインストールした場合は、`mise where github:12zend/raymotion` の出力を
+`raymotion.runtimePath` に設定します。miseで更新した後は、新しい出力先に設定し直してください。
 
 macOS・Metal・Python 3.9以上・C++17コンパイラが必要です。
 ソースツリーを使う場合はCMakeも必要です。FFmpegは不要です。

@@ -3,12 +3,18 @@
 C++17へコンパイルするシーン記述言語と、Metal GPU専用パストレーシングCLIです。
 固定シーン・OBJ・カメラ軌道は同梱しません。
 
+[GitHub](https://github.com/12zend/raymotion) ·
+[Releases](https://github.com/12zend/raymotion/releases) ·
+[Issues](https://github.com/12zend/raymotion/issues)
+
 ## ビルドとインストール
 
 必要: CMake 3.16以上、C++17コンパイラ、Python 3.9以上。
 MP4出力のみFFmpeg（libx264対応）が必要です。macOSを対象にしています。
 
 ```sh
+git clone https://github.com/12zend/raymotion.git
+cd raymotion
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
@@ -20,18 +26,51 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## miseからのインストール
 
-`.github/workflows/release.yml` は `v*` タグのpushでmacOSのアーキテクチャ別の配布アーカイブを
-GitHub Releasesに生成します。CLI、C++ヘッダー、コンパイル済みエンジンを含みます。
-リポジトリの公開・タグのpush後に、`OWNER` を実際の所有者へ置き換えて実行します。
-この作業コピーにはGitリモートが設定されていないため、配布URLは未確定です。
+[miseのインストール・シェル設定](https://mise.jdx.dev/getting-started.html)を済ませてから実行します。
+[GitHub Releases](https://github.com/12zend/raymotion/releases)に配布アーカイブ付きの
+Releaseが公開されている必要があります。リポジトリの公開だけではインストールできません。
 
 ```sh
-mise use -g github:OWNER/raymotion@latest
+mise use -g github:12zend/raymotion@latest
 raymotion --version
 ```
 
 miseの[GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html)を利用します。
-利用先にもPython 3とC++17コンパイラが必要です。Release版はエンジンの再ビルド不要です。
+macOSのApple Silicon・Intelに対応し、対応するアーカイブを自動選択します。
+利用先にもPython 3.9以上とC++17コンパイラが必要です。Release版はエンジンの再ビルド不要です。
+MP4出力にはFFmpeg（libx264対応）も必要です。
+
+### miseで更新する
+
+上記の `@latest` でインストールしたCLIは、新しいReleaseの公開後に更新できます。
+
+```sh
+mise upgrade github:12zend/raymotion
+raymotion --version
+```
+
+更新候補だけを確認する場合は `mise upgrade --dry-run github:12zend/raymotion` を使います。
+特定バージョンを固定している場合は、`mise use -g github:12zend/raymotion@latest` で
+最新追従に切り替えられます。プロジェクトの `mise.toml` に指定がある場合は、そちらが優先されます。
+詳細は[mise upgrade](https://mise.jdx.dev/cli/upgrade.html)を参照してください。
+
+### 配布版を更新する条件（開発者向け）
+
+[Releaseワークフロー](.github/workflows/release.yml)は `v*` タグのpushでビルド・テストし、
+成功後にこのリポジトリのGitHub Releasesへ以下を公開します。
+
+- `raymotion-macos-arm64.tar.gz`（Apple Silicon）
+- `raymotion-macos-x64.tar.gz`（Intel）
+- `SHA256SUMS`
+
+アーカイブには `bin/` のCLI、`include/` のC++ヘッダー、`lib/` のエンジン、
+`share/raymotion/compiler/` のコンパイラをまとめて含めます。
+miseは外側の `raymotion/` を自動除去して `bin/` をPATHへ追加し、CLIは自身の配置から同梱ファイルを参照します。
+
+更新時は `CMakeLists.txt` のプロジェクトバージョンと `src/cli/raymotion` の `VERSION` を揃え、
+対応する新しいバージョンタグ（例: `v0.1.1`）で配布してください。
+`VERSION` はタグから自動更新されません。通常の安定版タグを使い、既存タグ・Releaseの差し替えは避けます。
+mainへのpushだけではReleaseは作成されず、miseの更新対象にもなりません。
 
 ## CLI
 
