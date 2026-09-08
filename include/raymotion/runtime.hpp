@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <filesystem>
+#include <tuple>
 
 namespace raymotion {
 // Signals successful completion after the configured video frame limit.
@@ -18,6 +19,21 @@ using FrameSink = std::function<void(const std::vector<uint8_t>&, int, int, int)
 
 using Model = std::shared_ptr<const Scene>;
 class Objects {
+    struct Instance {
+        Model model;
+        Vec3 position, rotation, scale, albedo, emission;
+        std::optional<double> refract, rougth, metallic, alpha;
+        auto values() const {
+            return std::tie(model, position.x, position.y, position.z,
+                rotation.x, rotation.y, rotation.z, scale.x, scale.y, scale.z,
+                albedo.x, albedo.y, albedo.z, emission.x, emission.y, emission.z,
+                refract, rougth, metallic, alpha);
+        }
+        bool operator==(const Instance& other) const { return values()==other.values(); }
+    };
+    std::vector<Instance> instances, previous_instances;
+    bool scene_ready = false;
+    unsigned geometry_updates = 0;
     Renderer renderer;
     FrameSink frame_sink;
     std::unordered_map<std::string, Model> models;
@@ -61,13 +77,26 @@ public:
               std::optional<double> rougth={}, std::optional<double> metallic={}, std::optional<double> alpha={}) {
         if(!model) throw std::runtime_error("null object");
         if(scale.x==0 || scale.y==0 || scale.z==0) throw std::runtime_error("scale must be nonzero");
+        instances.push_back({model, position, rotation, scale, albedo, emission,
+                             refract, rougth, metallic, alpha});
+    }
+private:
+    void append(const Model& model, Vec3 position, Vec3 rotation, Vec3 scale,
+                Vec3 albedo, Vec3 emission, std::optional<double> refract,
+                std::optional<double> rougth, std::optional<double> metallic,
+                std::optional<double> alpha) {
         topology.push_back(model.get());
+        // Rotation is constant for every vertex and normal in this instance.
+        const double cx=cos_deg(rotation.x), sx=sin_deg(rotation.x);
+        const double cy=cos_deg(rotation.y), sy=sin_deg(rotation.y);
+        const double cz=cos_deg(rotation.z), sz=sin_deg(rotation.z);
+        renderer.scene.tris.reserve(renderer.scene.tris.size()+model->tris.size());
         auto rotate=[&](Vec3 v) {
-            double c=cos_deg(rotation.x),s=sin_deg(rotation.x);
+            double c=cx,s=sx;
             v={v.x,c*v.y-s*v.z,s*v.y+c*v.z};
-            c=cos_deg(rotation.y);s=sin_deg(rotation.y);
+            c=cy;s=sy;
             v={c*v.x+s*v.z,v.y,-s*v.x+c*v.z};
-            c=cos_deg(rotation.z);s=sin_deg(rotation.z);
+            c=cz;s=sz;
             return Vec3{c*v.x-s*v.y,s*v.x+c*v.y,v.z};
         };
         auto point=[&](Vec3 v){return rotate({v.x*scale.x,v.y*scale.y,v.z*scale.z})+position;};
@@ -81,12 +110,24 @@ public:
             if(index>=0) renderer.scene.tris[index].texture=t.texture;
         }
     }
+public:
     void render() {
         if(video && max_frames > 0 && frame >= max_frames) throw RenderComplete{};
         if(!video && frame>0) throw std::runtime_error("PNG requires exactly one object.render()");
-        if(topology==previous && frame%32!=0) refit_bvh(renderer.scene);
-        else renderer.build();
-        previous=topology;
+        // Camera motion and time-dependent shading still render every frame.
+        // Immutable models and identical push arguments can reuse world geometry.
+        if(!scene_ready || instances!=previous_instances) {
+            renderer.scene.clear_triangles(); topology.clear();
+            for(const auto& i:instances)
+                append(i.model, i.position, i.rotation, i.scale, i.albedo, i.emission,
+                       i.refract, i.rougth, i.metallic, i.alpha);
+            if(topology==previous && geometry_updates%32!=0) refit_bvh(renderer.scene);
+            else renderer.build();
+            ++geometry_updates;
+            previous=topology;
+            previous_instances=instances;
+            scene_ready=true;
+        }
         camera.update_trig(); camera.update_focal();
         bool ok;
         if(frame_sink) {
@@ -100,7 +141,7 @@ public:
         if(!ok) throw std::runtime_error("cannot write rendered frame");
         ++frame;
         timer = double(frame) / framerate;
-        renderer.scene.clear_triangles(); topology.clear();
+        instances.clear();
         if(video && max_frames > 0 && frame >= max_frames) throw RenderComplete{};
     }
     void finish() {if(frame==0) throw std::runtime_error("no object.render() executed");}

@@ -1,30 +1,42 @@
 'use strict';
-// Incremental binary decoder, independent of VS Code and transport chunk sizes.
+// Copy each payload byte once, regardless of transport fragmentation.
 class FrameDecoder {
-  constructor(onFrame) { this.onFrame = onFrame; this.buffer = Buffer.alloc(0); this.header = null; }
+  constructor(onFrame) {
+    this.onFrame = onFrame;
+    this.line = '';
+    this.header = null;
+    this.payload = null;
+    this.offset = 0;
+  }
   push(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    for (;;) {
+    let cursor = 0;
+    while (cursor < chunk.length) {
       if (!this.header) {
-        const end = this.buffer.indexOf(10);
-        if (end < 0) {
-          if (this.buffer.length > 128) throw new Error('Invalid preview header');
-          return;
-        }
-        const match = /^RAY1 (\d+) (\d+) (\d+) (\d+)$/.exec(this.buffer.subarray(0, end).toString());
+        const end = chunk.indexOf(10, cursor);
+        const stop = end < 0 ? chunk.length : end;
+        if (this.line.length + stop - cursor > 128) throw new Error('Invalid preview header');
+        this.line += chunk.subarray(cursor, stop).toString();
+        if (end < 0) return;
+        cursor = end + 1;
+        const match = /^RAY1 (\d+) (\d+) (\d+) (\d+)$/.exec(this.line);
         if (!match) throw new Error('Invalid preview protocol');
         const [w, h, frame, size] = match.slice(1).map(Number);
         if (w < 1 || h < 1 || w > 1920 || h > 1080 || size !== w * h * 3 || !Number.isSafeInteger(frame))
           throw new Error('Invalid preview dimensions');
         this.header = {w, h, frame, size};
-        this.buffer = this.buffer.subarray(end + 1);
+        this.line = '';
+        this.payload = Buffer.allocUnsafe(size);
+        this.offset = 0;
       }
-      if (this.buffer.length < this.header.size) return;
-      const header = this.header;
-      const rgb = this.buffer.subarray(0, header.size);
-      this.buffer = this.buffer.subarray(header.size);
+      const count = Math.min(chunk.length - cursor, this.header.size - this.offset);
+      chunk.copy(this.payload, this.offset, cursor, cursor + count);
+      cursor += count;
+      this.offset += count;
+      if (this.offset < this.header.size) return;
+      const frame = {...this.header, rgb: this.payload.toString('base64')};
       this.header = null;
-      this.onFrame({...header, rgb: rgb.toString('base64')});
+      this.payload = null;
+      this.onFrame(frame);
     }
   }
 }

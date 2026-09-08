@@ -3,6 +3,7 @@ const canvas = document.getElementById('canvas');
 const context = canvas.getContext('2d');
 const play = document.getElementById('play');
 const stop = document.getElementById('stop');
+let image;
 play.onclick = () => vscode.postMessage({type:'toggle'});
 stop.onclick = () => vscode.postMessage({type:'stop'});
 window.addEventListener('message', ({data}) => {
@@ -17,12 +18,15 @@ window.addEventListener('message', ({data}) => {
     document.getElementById('status').textContent = data.detail || '再生中';
   }
   if (data.type === 'frame') {
-    canvas.width = data.w; canvas.height = data.h;
-    const image = context.createImageData(data.w, data.h);
+    if (!image || canvas.width !== data.w || canvas.height !== data.h) {
+      canvas.width = data.w; canvas.height = data.h;
+      image = context.createImageData(data.w, data.h);
+      for (let j = 3; j < image.data.length; j += 4) image.data[j] = 255;
+    }
     const rgb = atob(data.rgb);
     for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
       image.data[j] = rgb.charCodeAt(i); image.data[j+1] = rgb.charCodeAt(i+1);
-      image.data[j+2] = rgb.charCodeAt(i+2); image.data[j+3] = 255;
+      image.data[j+2] = rgb.charCodeAt(i+2);
     }
     context.putImageData(image, 0, 0);
     canvas.hidden = false; document.getElementById('empty').hidden = true;

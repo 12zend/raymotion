@@ -43,6 +43,8 @@ test('direct Metal frames use backpressure and preserve scene time', {skip: proc
     });
     await result; assert.equal(count, 2);
     const files = await fs.readdir(path.join(temp, 'out'));
-    assert.deepEqual(files.sort(), ['preview', 'preview.cpp']);
+    assert.ok(files.includes('preview'));
+    assert.ok(files.includes('preview.cpp'));
+    assert.ok(!files.some(f => /\.(png|ppm|mp4)$/.test(f)));
   } finally { child?.kill('SIGKILL'); await fs.rm(temp, {recursive:true, force:true}); }
 });

@@ -28,13 +28,16 @@ function activate(context) {
       generation++; clearTimeout(timer); pending = null; kill(child); child = undefined;
       const old = directory; directory = undefined;
       if (old) fs.rm(old, {recursive: true, force: true}).catch(() => {});
-      status('stopped', '停止しました。次の再生で再コンパイルします。');
+      status('stopped', '停止しました。次の再生でビルドの更新を確認します。');
     };
     const fail = error => { stop(); status('error', String(error.message || error)); output.show(true); };
     const config = () => vscode.workspace.getConfiguration('raymotion', doc.uri);
-    let fps = 30;
+    let fps = 30, lastPresentation = 0;
     function present() {
       if (state !== 'playing' || !pending) return;
+      const delay = 1000 / fps - (performance.now() - lastPresentation);
+      if (delay > 0) { clearTimeout(timer); timer = setTimeout(present, delay); return; }
+      lastPresentation = performance.now();
       post({type: 'frame', ...pending}); pending = null;
       // Next credit is issued only after the canvas acknowledges presentation.
     }
@@ -46,6 +49,13 @@ function activate(context) {
       try {
         const cfg = config();
         const root = cfg.get('runtimePath') || path.resolve(context.extensionPath, '..');
+        const exists = file => fs.access(file).then(() => true, () => false);
+        if (!await exists(path.join(root, 'include/raymotion/preview.hpp')) ||
+            !(await exists(path.join(root, 'src/compiler/raymotion_compiler.py')) ||
+              await exists(path.join(root, 'share/raymotion/compiler/raymotion_compiler.py')))) {
+          throw new Error('Raymotionランタイムが見つかりません。設定「raymotion.runtimePath」にRaymotionリポジトリ、または更新版のインストール先を指定してください。現在の参照先: ' + root);
+        }
+        if (token !== generation) return;
         const options = ['width', 'height', 'sample', 'framerate'].map((key, i) => {
           const defaults = [640, 360, 4, 30], limits = [1920, 1080, 256, 120];
           const value = cfg.get('preview.' + key, defaults[i]);
@@ -58,7 +68,7 @@ function activate(context) {
         directory = temp;
         await new Promise((resolve, reject) => {
           const build = spawn(cfg.get('pythonPath', 'python3'),
-            [path.join(context.extensionPath, 'compile.py'), root, doc.fileName, temp, cfg.get('compilerPath', 'c++')],
+            [path.join(context.extensionPath, 'compile.py'), root, doc.fileName, temp, cfg.get('compilerPath', 'c++'), path.join(context.globalStorageUri.fsPath, 'preview-cache')],
             {cwd:path.dirname(doc.fileName), detached:true, stdio:['pipe','pipe','pipe']});
           child = build;
           build.stdout.on('data', b => output.append(b.toString()));
@@ -103,10 +113,9 @@ function activate(context) {
       }
       if (message.type === 'presented' && (state === 'playing' || state === 'paused')) {
         waitingCredit = true;
-        clearTimeout(timer);
-        timer = setTimeout(() => {
-          if (state === 'playing' && waitingCredit) { waitingCredit = false; child?.stdin.write('\n'); }
-        }, 1000 / fps);
+        // Render the next frame during the remaining presentation interval.
+        // Only one frame is in flight; present() enforces the requested FPS.
+        if (state === 'playing') { waitingCredit = false; child?.stdin.write('\n'); }
       }
     });
     panel.onDidDispose(() => { disposed = true; stop(); });
