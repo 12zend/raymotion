@@ -1,0 +1,15 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100vh; display: flex; flex-direction: column; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--vscode-panel-border); }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 4px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
+button:hover { background: var(--vscode-button-hoverBackground); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+svg { width: 16px; height: 16px; fill: currentColor; }
+#time { margin-left: auto; font-variant-numeric: tabular-nums; }
+main { flex: 1; min-height: 0; display: flex; justify-content: center; align-items: center; padding: 16px; overflow: hidden; }
+canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+[hidden] { display: none; }
+footer { padding: 10px 16px; min-height: 38px; border-top: 1px solid var(--vscode-panel-border); overflow-wrap: anywhere; }
+::selection { background: var(--vscode-editor-selectionBackground); }

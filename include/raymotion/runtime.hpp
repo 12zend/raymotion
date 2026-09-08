@@ -14,9 +14,12 @@ struct RenderComplete {};
 
 struct Resolution { double x, y; };
 
+using FrameSink = std::function<void(const std::vector<uint8_t>&, int, int, int)>;
+
 using Model = std::shared_ptr<const Scene>;
 class Objects {
     Renderer renderer;
+    FrameSink frame_sink;
     std::unordered_map<std::string, Model> models;
     std::vector<const Scene*> topology, previous;
     std::filesystem::path output;
@@ -35,6 +38,12 @@ public:
         if(fps <= 0) throw std::invalid_argument("framerate must be positive");
         if(frame_limit < 0) throw std::invalid_argument("frame limit must be nonnegative");
         renderer.configure(width,height,sample);
+    }
+    // A synchronous sink provides backpressure and owns presentation, never file output.
+    Objects(FrameSink sink, int width, int height, int sample, int fps = 30)
+        : Objects("", width, height, sample, true, fps) {
+        if(!sink) throw std::invalid_argument("frame sink is required");
+        frame_sink = std::move(sink);
     }
     Model init(const std::string& path, const std::string& mtl="") {
         const std::string key=path+std::string(1,'\0')+mtl;
@@ -80,7 +89,11 @@ public:
         previous=topology;
         camera.update_trig(); camera.update_focal();
         bool ok;
-        if(video) {
+        if(frame_sink) {
+            auto pixels = renderer.render(12345 + frame);
+            frame_sink(pixels, renderer.config.width, renderer.config.height, frame);
+            ok = true;
+        } else if(video) {
             char name[40]; std::snprintf(name,sizeof(name),"f%08d.ppm",frame);
             ok=renderer.render_to_ppm((output/name).string(),12345+frame);
         } else ok=renderer.render_to_png(output.string());

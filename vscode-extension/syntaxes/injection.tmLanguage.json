@@ -1,0 +1,11 @@
+{
+ "scopeName":"raymotion.injection",
+ "injectionSelector":"L:source.raymotion -comment -string",
+ "patterns":[
+  {"match":"\\bvoid\\b(?=\\s+(?:/\\*.*?\\*/\\s*)*[A-Za-z_]\\w*\\s*=\\s*object\\s*\\.\\s*init\\s*\\()","name":"storage.type.raymotion"},
+  {"match":"\\b(object|camera)\\b","name":"variable.language.raymotion"},
+  {"match":"\\b(u_timer|u_resolution|width|height|sample|framerate)\\b","name":"constant.language.raymotion"},
+  {"match":"(?<=\\.)\\s*\\b(init|push|render|set)\\b","name":"support.function.raymotion"},
+  {"match":"\\b(Vec3|Model|Resolution)\\b","name":"support.type.raymotion"}
+ ]
+}

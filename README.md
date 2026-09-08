@@ -248,3 +248,11 @@ tests/                   コンパイラ・CLI・BVH検証
 ```
 
 インストール済みCLIのE2E検証: `python3 tests/smoke_export.py /absolute/path/to/bin/raymotion`。
+
+## VSCode拡張機能
+
+[vscode-extension](vscode-extension/README.md)に専用拡張機能があります。
+C++とRaymotion固有構文のテーマ対応色付けと、コマンドパレットの
+「Raymotion: Open Preview」から開く直接描画プレビューに対応します。
+再生／一時停止、右隣の停止ボタンを備え、停止後は再コンパイルします。
+プレビューは既存MetalエンジンのRGBバッファを直接表示し、CLIや動画出力を経由しません。

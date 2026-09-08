@@ -16,6 +16,15 @@ class CompilerTests(unittest.TestCase):
         self.assertIn('// void a = object.init("x");',result)
         self.assertIn('"void a = object.init(x)"',result)
         self.assertIn('auto /*hi*/ model',result)
+    def test_preview_uses_shared_frame_sink(self):
+        result = cli.transpile('void model = object.init("a.obj");\nobject.render();',
+                               preview=True, filename='/tmp/scene.ray')
+        self.assertIn('#include <raymotion/preview.hpp>', result)
+        self.assertIn('Objects object(stream.sink(),width,height,sample,framerate);', result)
+        self.assertIn('auto model', result)
+        self.assertIn('#line 1 "/tmp/scene.ray"', result)
+        self.assertNotIn('Objects object(argv[1]', result)
+
     def test_init_no_overwrite(self):
         with tempfile.TemporaryDirectory() as d:
             subprocess.run([str(CLI),'init',d],check=True,capture_output=True)

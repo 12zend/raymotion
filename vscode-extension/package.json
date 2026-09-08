@@ -1,0 +1,30 @@
+{
+  "name": "raymotion",
+  "displayName": "Raymotion",
+  "description": "C++ syntax highlighting and direct Metal previews for .ray scenes.",
+  "version": "0.1.0",
+  "publisher": "raymotion",
+  "engines": {"vscode": "^1.85.0"},
+  "categories": ["Programming Languages", "Visualization"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:raymotion"],
+  "capabilities": {"untrustedWorkspaces": {"supported": "limited", "description": "Preview executes scene C++ and requires workspace trust."}, "virtualWorkspaces": false},
+  "contributes": {
+    "languages": [{"id": "raymotion", "aliases": ["Raymotion"], "extensions": [".ray"], "configuration": "./language-configuration.json"}],
+    "grammars": [
+      {"language": "raymotion", "scopeName": "source.raymotion", "path": "./syntaxes/raymotion.tmLanguage.json"},
+      {"scopeName": "raymotion.injection", "path": "./syntaxes/injection.tmLanguage.json", "injectTo": ["source.raymotion"]}
+    ],
+    "commands": [{"command": "raymotion.openPreview", "title": "Raymotion: Open Preview"}],
+    "configuration": {"title": "Raymotion", "properties": {
+      "raymotion.runtimePath": {"type": "string", "default": "", "scope": "machine", "description": "Raymotion repository or installation prefix (include/ and lib/)."},
+      "raymotion.pythonPath": {"type": "string", "default": "python3", "scope": "machine"},
+      "raymotion.compilerPath": {"type": "string", "default": "c++", "scope": "machine"},
+      "raymotion.preview.width": {"type": "integer", "default": 640, "minimum": 16, "maximum": 1920},
+      "raymotion.preview.height": {"type": "integer", "default": 360, "minimum": 16, "maximum": 1080},
+      "raymotion.preview.sample": {"type": "integer", "default": 4, "minimum": 1, "maximum": 256},
+      "raymotion.preview.framerate": {"type": "integer", "default": 30, "minimum": 1, "maximum": 120}
+    }}
+  },
+  "scripts": {"test": "node --test test/*.test.js"}
+}

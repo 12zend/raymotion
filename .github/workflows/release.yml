@@ -21,6 +21,10 @@ jobs:
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test vscode-extension/test/*.test.js
       - run: cmake --install build --prefix "$PWD/dist/raymotion"
       - run: python3 tests/smoke_export.py "$PWD/dist/raymotion/bin/raymotion"
       - run: tar -czf raymotion-${{ matrix.platform }}.tar.gz -C dist raymotion
